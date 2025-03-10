@@ -1,0 +1,1 @@
+export const loginBg = require('./images/logo.png')
