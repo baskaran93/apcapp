@@ -1,231 +1,286 @@
-import React from "react";
+import React, { useState, useContext, useCallback } from "react";
 import {
-  SafeAreaView,
+  View,
   Text,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
-  Image,
+  TouchableOpacity,
   ScrollView,
-  View,
-  KeyboardAvoidingView,
-  Platform,
-  TouchableWithoutFeedback,
-  Keyboard,
-  Dimensions,
+  SafeAreaView,
+  StatusBar,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native"; // Import navigation hook
-import { useForm, Controller } from "react-hook-form";
-import Icon from "react-native-vector-icons/Ionicons"; // Import Icon Library
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import Icon from "react-native-vector-icons/Ionicons";
+import { ThemeContext } from "../theme/ThemeContext";
+import { createPatient } from "../services/api";
 
-const LoginBgimg = require("../../assets/images/logo.png");
+const EMPTY_FORM = {
+  name: "",
+  mobile: "",
+  pincode: "",
+  city: "",
+  address: "",
+  age: "",
+  referral: "",
+};
 
-const Registration = () => {
-  const navigation = useNavigation(); // Access navigation
-  const {
-    control,
-    handleSubmit,
-    formState: { errors },
-  } = useForm();
-  const onSubmit = (data) => console.log("Form Data:", data);
+const PatientProfileScreen = () => {
+  const navigation = useNavigation();
+  const { theme, mode } = useContext(ThemeContext);
+
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+
+  // 🔹 ALWAYS RESET FORM WHEN SCREEN OPENS
+  useFocusEffect(
+    useCallback(() => {
+      setForm(EMPTY_FORM);
+    }, [])
+  );
+
+  const handleChange = (key, value) => {
+    setForm({ ...form, [key]: value });
+  };
+
+  // 🔹 SAVE PATIENT FUNCTION
+  const handleSavePatient = async () => {
+    if (!form.name || !form.mobile) {
+      Alert.alert("Validation", "Name and Mobile are required");
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const response = await createPatient(form);
+
+      if (response.ok) {
+        // 🎉 SUCCESS MESSAGE
+        Alert.alert("Success", "Patient registered successfully", [
+          {
+            text: "OK",
+            onPress: () => {
+              // 🔙 GO BACK TO PATIENT LIST (NOT DASHBOARD)
+              navigation.navigate("Patient List");
+            },
+          },
+        ]);
+      } else {
+        const msg =
+          response.data?.detail ||
+          response.data?.message ||
+          "Failed to save patient";
+        Alert.alert("Error", msg);
+      }
+    } catch (error) {
+      console.error("SAVE ERROR 👉", error);
+      Alert.alert("Network Error", "Unable to save patient");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.avoidingView}
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
+      <StatusBar
+        barStyle={mode === "dark" ? "light-content" : "dark-content"}
+        backgroundColor={theme.card}
+      />
+
+      {/* 🔹 HEADER */}
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: theme.card, borderBottomColor: theme.border },
+        ]}
+      >
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
         >
-          <ScrollView contentContainerStyle={styles.scrollContainer}>
-            {/* Back Button */}
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Icon name="arrow-back" size={30} color="black" />
-            </TouchableOpacity>
+          <Icon name="arrow-back" size={24} color={theme.text} />
+        </TouchableOpacity>
 
-            <Image source={LoginBgimg} style={styles.logo} />
-            <Text style={styles.title}>Visitor Registration</Text>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>
+          Add Patient
+        </Text>
+      </View>
 
-            <View style={styles.formContainer}>
-              {/* Name */}
-              <Text style={styles.label}>Name *</Text>
-              <Controller
-                control={control}
-                rules={{ required: "Name is required" }}
-                render={({ field: { onChange, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your name"
-                    onChangeText={onChange}
-                    value={value}
-                  />
-                )}
-                name="name"
-              />
-              {errors.name && <Text style={styles.error}>{errors.name.message}</Text>}
+      <ScrollView contentContainerStyle={styles.container}>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.card, shadowColor: "#000" },
+          ]}
+        >
+          <Field
+            label="Name *"
+            placeholder="Enter name"
+            value={form.name}
+            onChange={(v) => handleChange("name", v)}
+            theme={theme}
+          />
 
-              {/* Mobile Number */}
-              <Text style={styles.label}>Mobile Number (10 digits only) *</Text>
-              <Controller
-                control={control}
-                rules={{
-                  required: "Mobile number is required",
-                  pattern: {
-                    value: /^[0-9]{10}$/,
-                    message: "Enter a valid 10-digit number",
-                  },
-                }}
-                render={({ field: { onChange, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter mobile number"
-                    keyboardType="numeric"
-                    onChangeText={onChange}
-                    value={value}
-                  />
-                )}
-                name="mobile"
-              />
-              {errors.mobile && <Text style={styles.error}>{errors.mobile.message}</Text>}
+          <Field
+            label="Mobile Number *"
+            placeholder="Enter mobile"
+            keyboardType="numeric"
+            value={form.mobile}
+            onChange={(v) => handleChange("mobile", v)}
+            theme={theme}
+          />
 
-              {/* Pincode */}
-              <Text style={styles.label}>Pincode *</Text>
-              <Controller
-                control={control}
-                rules={{ required: "Pincode is required" }}
-                render={({ field: { onChange, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter pincode"
-                    keyboardType="numeric"
-                    onChangeText={onChange}
-                    value={value}
-                  />
-                )}
-                name="pincode"
-              />
-              {errors.pincode && <Text style={styles.error}>{errors.pincode.message}</Text>}
+          <Field
+            label="Pincode"
+            placeholder="Enter pincode"
+            keyboardType="numeric"
+            value={form.pincode}
+            onChange={(v) => handleChange("pincode", v)}
+            theme={theme}
+          />
 
-              {/* City */}
-              <Text style={styles.label}>City *</Text>
-              <Controller
-                control={control}
-                rules={{ required: "City is required" }}
-                render={({ field: { onChange, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter city"
-                    onChangeText={onChange}
-                    value={value}
-                  />
-                )}
-                name="city"
-              />
-              {errors.city && <Text style={styles.error}>{errors.city.message}</Text>}
+          <Field
+            label="City"
+            placeholder="Enter city"
+            value={form.city}
+            onChange={(v) => handleChange("city", v)}
+            theme={theme}
+          />
 
-              {/* Email */}
-              <Text style={styles.label}>Email ID *</Text>
-              <Controller
-                control={control}
-                rules={{
-                  required: "Email is required",
-                  pattern: {
-                    value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                    message: "Enter a valid email",
-                  },
-                }}
-                render={({ field: { onChange, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter email ID"
-                    keyboardType="email-address"
-                    onChangeText={onChange}
-                    value={value}
-                  />
-                )}
-                name="email"
-              />
-              {errors.email && <Text style={styles.error}>{errors.email.message}</Text>}
+          <Field
+            label="Address"
+            placeholder="Enter address"
+            value={form.address}
+            onChange={(v) => handleChange("address", v)}
+            multiline
+            theme={theme}
+          />
 
-              {/* Submit Button */}
-              <TouchableOpacity style={styles.button} onPress={handleSubmit(onSubmit)}>
-                <Text style={styles.buttonText}>Submit</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </TouchableWithoutFeedback>
+          <Field
+            label="Age"
+            placeholder="Enter age"
+            keyboardType="numeric"
+            value={form.age}
+            onChange={(v) => handleChange("age", v)}
+            theme={theme}
+          />
+
+          <Field
+            label="Referral"
+            placeholder="Doctor / Friend / Online"
+            value={form.referral}
+            onChange={(v) => handleChange("referral", v)}
+            theme={theme}
+          />
+
+          {/* 🔹 SAVE BUTTON */}
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: theme.primary }]}
+            onPress={handleSavePatient}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.saveText}>Save Patient</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
 
-const { width } = Dimensions.get("window");
+/* 🔹 REUSABLE FIELD */
+const Field = ({ label, onChange, theme, ...props }) => (
+  <View style={styles.fieldBlock}>
+    <Text style={[styles.label, { color: theme.text }]}>{label}</Text>
+    <TextInput
+      {...props}
+      onChangeText={onChange}
+      style={[
+        styles.input,
+        {
+          backgroundColor: theme.background,
+          borderColor: theme.border,
+          color: theme.text,
+        },
+        props.multiline && { height: 80, textAlignVertical: "top" },
+      ]}
+      placeholderTextColor={theme.subText}
+    />
+  </View>
+);
+
+export default PatientProfileScreen;
+
+/* ---------- STYLES ---------- */
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
-  avoidingView: {
-    flex: 1,
-  },
-  scrollContainer: {
-    flexGrow: 1,
+  safe: { flex: 1 },
+
+  header: {
+    height: 55,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 20,
+    borderBottomWidth: 1,
+    elevation: 2,
   },
-  backButton: {
+
+  backBtn: {
     position: "absolute",
-    top: 50, // Adjust according to your UI
-    left: 20,
-    zIndex: 10,
+    left: 15,
+    padding: 6,
   },
-  logo: {
-    width: width > 600 ? 400 : 300,
-    height: width > 600 ? 300 : 200,
-    resizeMode: "contain",
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: width > 600 ? 26 : 20,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 20,
-    color: "red",
-  },
-  formContainer: {
-    width: width > 600 ? "50%" : "90%", // Adjust form width for larger screens
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: "bold",
-    marginBottom: 5,
-  },
-  input: {
-    height: 50,
-    borderColor: "gray",
-    borderWidth: 1,
-    borderRadius: 5,
-    marginBottom: 10,
-    paddingHorizontal: 10,
-    fontSize: width > 600 ? 18 : 16,
-  },
-  error: {
-    color: "red",
-    marginBottom: 10,
-  },
-  button: {
-    backgroundColor: "red",
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: "center",
-    marginTop: 10,
-  },
-  buttonText: {
-    color: "white",
+
+  headerTitle: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: "700",
+  },
+
+  container: {
+    padding: 16,
+  },
+
+  card: {
+    borderRadius: 14,
+    padding: 16,
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+
+  fieldBlock: {
+    marginBottom: 14,
+  },
+
+  label: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
+
+  input: {
+    height: 44,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 15,
+  },
+
+  saveBtn: {
+    marginTop: 25,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+
+  saveText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });
-
-export default Registration;

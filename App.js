@@ -1,23 +1,25 @@
+// App.js (FINAL GLOBAL VERSION)
+
 import React, { useState, createContext } from "react";
 import { NavigationContainer } from "@react-navigation/native";
+import "react-native-gesture-handler";
+import { ThemeProvider } from "./src/theme/ThemeContext";
 import AuthNavigator from "./AuthNavigator";
 import AppNavigator from "./AppNavigator";
 
-import "react-native-gesture-handler"; // Ensure this is at the top
-import { gestureHandlerRootHOC } from "react-native-gesture-handler";
-
 export const AuthContext = createContext();
 
-function MainApp() {
-  const [userToken, setUserToken] = useState("token123"); // ✅ Simulating logged-in user
+export default function App() {
+  const [userToken, setUserToken] = useState(null); // start logged out
 
   return (
     <AuthContext.Provider value={{ userToken, setUserToken }}>
-      <NavigationContainer>
-        {userToken ? <AppNavigator /> : <AuthNavigator />}
-      </NavigationContainer>
+      🔥{/* GLOBAL THEME PROVIDER */}
+      <ThemeProvider>
+        <NavigationContainer>
+          {userToken ? <AppNavigator /> : <AuthNavigator />}
+        </NavigationContainer>
+      </ThemeProvider>
     </AuthContext.Provider>
   );
 }
-
-export default gestureHandlerRootHOC(MainApp); // ✅ Wrap App with gestureHandlerRootHOC

@@ -7,9 +7,12 @@ import { AuthContext } from "./App";
 import LoginScreen from "./src/screens/login";
 import DashboardScreen from "./src/screens/DashboardScreen";
 import PatientProfileScreen from "./src/screens/registration";
+import PatientListScreen from "./src/screens/patientlistscreen";
+import TreatmentChargesMaster from "./src/screens/TreatmentChargesMaster";
 
 const Drawer = createDrawerNavigator();
 const Stack = createStackNavigator();
+
 
 // ✅ Logout Screen (Handles Logout)
 const LogoutScreen = ({ navigation }) => {
@@ -53,6 +56,24 @@ function DrawerNavigator() {
         options={{
           drawerIcon: ({ color, size }) => (
             <Icon name="account" size={size} color={color} />
+          ),
+        }}
+      />
+      <Drawer.Screen
+        name="Patient List"
+        component={PatientListScreen}
+        options={{
+          drawerIcon: ({ color, size }) => (
+            <Icon name="format-list-bulleted" size={size} color={color} />
+          ),
+        }}
+      />
+      <Drawer.Screen
+        name="Treatment Charges"
+        component={TreatmentChargesMaster}
+        options={{
+          drawerIcon: ({ color, size }) => (
+            <Icon name="cash-multiple" size={size} color={color} />
           ),
         }}
       />

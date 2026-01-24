@@ -3,6 +3,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import LoginScreen from './src/screens/login';
 import DashboardScreen from './src/screens/DashboardScreen';
+import PatientListScreen from './src/screens/PatientListScreen';  // List of registered patients
 import PatientProfileScreen from './src/screens/registration';
 
 const Stack = createStackNavigator();
@@ -14,6 +15,7 @@ function DrawerNavigatorComponent() {
     <Drawer.Navigator screenOptions={{ headerShown: false }}>
       <Drawer.Screen name="Dashboard" component={DashboardScreen} />
       <Drawer.Screen name="Patient Profile" component={PatientProfileScreen} />
+      <Drawer.Screen name="Patient List" component={PatientListScreen} />
     </Drawer.Navigator>
   );
 }
