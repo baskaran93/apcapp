@@ -17,7 +17,7 @@ import {
 import { getTreatmentCharges, addTreatmentCharge } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
 import { useNavigation } from "@react-navigation/native";
-import Icon from "react-native-vector-icons/Ionicons";
+import { Ionicons as Icon } from "@expo/vector-icons";
 
 const TreatmentChargesMaster = () => {
     const navigation = useNavigation();
