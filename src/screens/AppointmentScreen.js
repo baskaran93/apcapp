@@ -25,6 +25,8 @@ import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { Ionicons as Icon } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { ThemeContext } from "../theme/ThemeContext";
+import { AuthContext } from "../context/AuthContext";
+import { hasPermission } from "../utils/permissions";
 import {
   getPatients,
   bookAppointment,
@@ -88,6 +90,10 @@ const STATUS_COLORS = {
 export default function AppointmentScreen() {
   const navigation = useNavigation();
   const { theme, mode } = useContext(ThemeContext);
+  const { permissions } = useContext(AuthContext);
+  const canAdd = hasPermission(permissions, "appointments", "add");
+  const canEdit = hasPermission(permissions, "appointments", "edit");
+  const canDelete = hasPermission(permissions, "appointments", "delete");
   const isDark = mode === "dark";
 
   const [selectedDate, setSelectedDate] = useState(toDateStr(new Date()));
@@ -344,31 +350,37 @@ export default function AppointmentScreen() {
           </Text>
         )}
 
-        {item.status === "Scheduled" && (
+        {item.status === "Scheduled" && (canEdit || canDelete) && (
           <View style={styles.apptActions}>
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: theme.primary + "18" }]}
-              onPress={() => openFixModal(item)}
-            >
-              <Icon name="create-outline" size={16} color={theme.primary} />
-              <Text style={[styles.actionBtnText, { color: theme.primary }]}>Fix / Reschedule</Text>
-            </TouchableOpacity>
+            {canEdit && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: theme.primary + "18" }]}
+                onPress={() => openFixModal(item)}
+              >
+                <Icon name="create-outline" size={16} color={theme.primary} />
+                <Text style={[styles.actionBtnText, { color: theme.primary }]}>Fix / Reschedule</Text>
+              </TouchableOpacity>
+            )}
 
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: "#22c55e18" }]}
-              onPress={() => handleStatusChange(item, "Completed")}
-            >
-              <Icon name="checkmark-circle-outline" size={16} color="#22c55e" />
-              <Text style={[styles.actionBtnText, { color: "#22c55e" }]}>Complete</Text>
-            </TouchableOpacity>
+            {canEdit && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: "#22c55e18" }]}
+                onPress={() => handleStatusChange(item, "Completed")}
+              >
+                <Icon name="checkmark-circle-outline" size={16} color="#22c55e" />
+                <Text style={[styles.actionBtnText, { color: "#22c55e" }]}>Complete</Text>
+              </TouchableOpacity>
+            )}
 
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: "#ef444418" }]}
-              onPress={() => handleCancel(item)}
-            >
-              <Icon name="close-circle-outline" size={16} color="#ef4444" />
-              <Text style={[styles.actionBtnText, { color: "#ef4444" }]}>Cancel</Text>
-            </TouchableOpacity>
+            {canDelete && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: "#ef444418" }]}
+                onPress={() => handleCancel(item)}
+              >
+                <Icon name="close-circle-outline" size={16} color="#ef4444" />
+                <Text style={[styles.actionBtnText, { color: "#ef4444" }]}>Cancel</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </View>
@@ -391,13 +403,15 @@ export default function AppointmentScreen() {
               Daily appointment booking & fixing
             </Text>
           </View>
-          <TouchableOpacity
-            style={[styles.bookBtn, { backgroundColor: theme.primary }]}
-            onPress={openBookModal}
-          >
-            <Icon name="add" size={20} color="#fff" />
-            <Text style={styles.bookBtnText}>Book</Text>
-          </TouchableOpacity>
+          {canAdd && (
+            <TouchableOpacity
+              style={[styles.bookBtn, { backgroundColor: theme.primary }]}
+              onPress={openBookModal}
+            >
+              <Icon name="add" size={20} color="#fff" />
+              <Text style={styles.bookBtnText}>Book</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Date chips */}

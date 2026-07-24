@@ -262,9 +262,10 @@ function SettingRow({ icon, label, danger, onPress, isDark, theme }) {
 ========================================================= */
 const SettingsScreen = () => {
   const navigation = useNavigation();
-  const { setUserToken } = useContext(AuthContext);
+  const { setUserToken, userRole } = useContext(AuthContext);
   const { theme, mode } = useContext(ThemeContext);
   const isDark = mode === "dark";
+  const isAdmin = userRole === "admin";
 
   const [logoutVisible, setLogoutVisible] = useState(false);
   const [changePwdVisible, setChangePwdVisible] = useState(false);
@@ -296,6 +297,29 @@ const SettingsScreen = () => {
           isDark={isDark}
           theme={theme}
         />
+
+        {isAdmin && (
+          <>
+            <Text style={[styles.sectionLabel, { color: theme.subText, marginTop: 18 }]}>
+              ADMINISTRATION
+            </Text>
+
+            <SettingRow
+              icon="person-add-outline"
+              label="Manage Users"
+              onPress={() => navigation.navigate("Manage Users")}
+              isDark={isDark}
+              theme={theme}
+            />
+            <SettingRow
+              icon="options-outline"
+              label="Menu Rights"
+              onPress={() => navigation.navigate("Menu Rights")}
+              isDark={isDark}
+              theme={theme}
+            />
+          </>
+        )}
       </View>
 
       <LogoutModal

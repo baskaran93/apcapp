@@ -443,3 +443,192 @@ export const getDistinctPhysiotherapists = async () => {
       throw error;
     }
   };
+
+// ===== Patient delete =====
+export const deletePatient = async (id) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/patient/details/${id}/`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Delete Patient Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+// ===== Treatment charges: edit/delete =====
+export const updateTreatmentCharge = async (id, data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/treatment_charges/${id}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Update Treatment Charge Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const deleteTreatmentCharge = async (id) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/treatment_charges/${id}/`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Delete Treatment Charge Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+// ===== Patient treatment (session) edit/delete =====
+export const updateTreatment = async (sessionId, payload) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/patient/treatement/details/${sessionId}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Update Treatment Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const deleteTreatment = async (sessionId) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/patient/treatement/details/${sessionId}/`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Delete Treatment Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+// ===== Role permissions (admin) & self-check =====
+export const getMyPermissions = async () => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/permissions/me/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get My Permissions Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const getPermissionsMatrix = async () => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/permissions/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get Permissions Matrix Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const updatePermission = async (payload) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/permissions/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Update Permission Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+// ===== User management (admin) =====
+export const getUsers = async () => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/user/list/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get Users Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const registerUser = async (username, password, role) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/user/register/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ username, password_hash: password, role }),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Register User Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};

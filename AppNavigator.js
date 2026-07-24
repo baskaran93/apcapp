@@ -17,6 +17,7 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { AuthContext } from "./src/context/AuthContext";
 import { ThemeContext } from "./src/theme/ThemeContext";
+import { hasPermission } from "./src/utils/permissions";
 
 import LoginScreen from "./src/screens/login";
 import DashboardScreen from "./src/screens/DashboardScreen";
@@ -26,6 +27,15 @@ import TreatmentChargesMaster from "./src/screens/TreatmentChargesMaster";
 import PatientTreatmentDetails from "./src/screens/PatientTreatmentDetails";
 import AppointmentScreen from "./src/screens/AppointmentScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
+import UserManagementScreen from "./src/screens/UserManagementScreen";
+import MenuRightsScreen from "./src/screens/MenuRightsScreen";
+
+const MENU_BY_ROUTE = {
+  Patients: "patients",
+  Appointments: "appointments",
+  "Treatment Charges": "treatment_charges",
+  "Patient Treatment": "patient_treatment",
+};
 
 const Drawer = createDrawerNavigator();
 const Stack = createStackNavigator();
@@ -34,7 +44,7 @@ const Stack = createStackNavigator();
    ✅ Custom Trending Drawer UI
 ========================================================= */
 function CustomDrawerContent(props) {
-  const { userName, userRole } = useContext(AuthContext);
+  const { userName, userRole, permissions } = useContext(AuthContext);
   const { theme, mode } = useContext(ThemeContext);
 
   const isDark = mode === "dark";
@@ -92,16 +102,14 @@ function CustomDrawerContent(props) {
           {props.state.routes.map((route, index) => {
             const focused = index === props.state.index;
 
-            // Settings is accessed via the header button, not the sidebar menu
-            if (route.name === "Settings") return null;
+            // Settings and admin-only management screens are reached via
+            // Settings, not the sidebar menu
+            if (["Settings", "Manage Users", "Menu Rights"].includes(route.name)) return null;
 
-            // Role-based sidebar visibility
-            if (route.name === "Treatment Charges" && userRole !== "admin") return null;
-            if (
-              route.name === "Patient Treatment" &&
-              !["admin", "doctor"].includes(userRole)
-            )
-              return null;
+            // Menu-scoped visibility: driven by the configurable role_permissions
+            // table (admin's /permissions/me/ is all-true, so admin always sees everything)
+            const menuKey = MENU_BY_ROUTE[route.name];
+            if (menuKey && !hasPermission(permissions, menuKey, "view")) return null;
 
             const onPress = () => props.navigation.navigate(route.name);
 
@@ -168,8 +176,24 @@ function CustomDrawerContent(props) {
 }
 
 /* =========================================================
-   ✅ Role Guard (blocks direct navigation to a restricted screen,
-   e.g. via deep link, even if it's hidden from the sidebar)
+   ✅ Access Denied placeholder shared by both guards below
+========================================================= */
+function AccessDenied({ theme }) {
+  return (
+    <View style={[styles.deniedContainer, { backgroundColor: theme.background }]}>
+      <Icon name="lock-outline" size={48} color={theme.subText} />
+      <Text style={[styles.deniedTitle, { color: theme.text }]}>Access Restricted</Text>
+      <Text style={[styles.deniedText, { color: theme.subText }]}>
+        You don't have permission to view this screen.
+      </Text>
+    </View>
+  );
+}
+
+/* =========================================================
+   ✅ Role Guard - for screens that are always admin-only
+   (user management, menu rights) regardless of the
+   configurable permission matrix.
 ========================================================= */
 function withRoleGuard(ScreenComponent, allowedRoles) {
   return function RoleGuardedScreen(props) {
@@ -177,22 +201,25 @@ function withRoleGuard(ScreenComponent, allowedRoles) {
     const { theme } = useContext(ThemeContext);
 
     if (!allowedRoles.includes(userRole)) {
-      return (
-        <View
-          style={[
-            styles.deniedContainer,
-            { backgroundColor: theme.background },
-          ]}
-        >
-          <Icon name="lock-outline" size={48} color={theme.subText} />
-          <Text style={[styles.deniedTitle, { color: theme.text }]}>
-            Access Restricted
-          </Text>
-          <Text style={[styles.deniedText, { color: theme.subText }]}>
-            You don't have permission to view this screen.
-          </Text>
-        </View>
-      );
+      return <AccessDenied theme={theme} />;
+    }
+
+    return <ScreenComponent {...props} />;
+  };
+}
+
+/* =========================================================
+   ✅ Permission Guard - for the four configurable business
+   menus. Blocks direct navigation even if the sidebar entry
+   is hidden (e.g. via deep link).
+========================================================= */
+function withPermissionGuard(ScreenComponent, menu) {
+  return function PermissionGuardedScreen(props) {
+    const { permissions } = useContext(AuthContext);
+    const { theme } = useContext(ThemeContext);
+
+    if (!hasPermission(permissions, menu, "view")) {
+      return <AccessDenied theme={theme} />;
     }
 
     return <ScreenComponent {...props} />;
@@ -216,6 +243,24 @@ function DrawerNavigator() {
         sceneContainerStyle: {
           backgroundColor: "#f8fafc",
         },
+        headerLeft: () =>
+          navigation.canGoBack() ? (
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={{ paddingHorizontal: 16 }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Icon name="arrow-left" size={24} color="#0f172a" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={() => navigation.toggleDrawer()}
+              style={{ paddingHorizontal: 16 }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Icon name="menu" size={24} color="#0f172a" />
+            </TouchableOpacity>
+          ),
         headerRight: () =>
           route.name === "Settings" ? null : (
             <TouchableOpacity
@@ -229,17 +274,31 @@ function DrawerNavigator() {
       })}
     >
       <Drawer.Screen name="Dashboard" component={DashboardScreen} />
-      <Drawer.Screen name="Patients" component={PatientListScreen} />
-      <Drawer.Screen name="Appointments" component={AppointmentScreen} />
+      <Drawer.Screen
+        name="Patients"
+        component={withPermissionGuard(PatientListScreen, "patients")}
+      />
+      <Drawer.Screen
+        name="Appointments"
+        component={withPermissionGuard(AppointmentScreen, "appointments")}
+      />
       <Drawer.Screen
         name="Treatment Charges"
-        component={withRoleGuard(TreatmentChargesMaster, ["admin"])}
+        component={withPermissionGuard(TreatmentChargesMaster, "treatment_charges")}
       />
       <Drawer.Screen
         name="Patient Treatment"
-        component={withRoleGuard(PatientTreatmentDetails, ["admin", "doctor"])}
+        component={withPermissionGuard(PatientTreatmentDetails, "patient_treatment")}
       />
       <Drawer.Screen name="Settings" component={SettingsScreen} />
+      <Drawer.Screen
+        name="Manage Users"
+        component={withRoleGuard(UserManagementScreen, ["admin"])}
+      />
+      <Drawer.Screen
+        name="Menu Rights"
+        component={withRoleGuard(MenuRightsScreen, ["admin"])}
+      />
     </Drawer.Navigator>
   );
 }

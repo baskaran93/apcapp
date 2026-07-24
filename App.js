@@ -48,6 +48,7 @@ export default function App() {
   const [userToken, setUserToken] = useState(null);
   const [userName, setUserName] = useState("");
   const [userRole, setUserRole] = useState("");
+  const [permissions, setPermissions] = useState(null);
   const [isReady, setIsReady] = useState(false);
 
   console.log("[App] Rendering full application component...");
@@ -88,7 +89,16 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary>
         <AuthContext.Provider
-          value={{ userToken, setUserToken, userName, setUserName, userRole, setUserRole }}
+          value={{
+            userToken,
+            setUserToken,
+            userName,
+            setUserName,
+            userRole,
+            setUserRole,
+            permissions,
+            setPermissions,
+          }}
         >
           <ThemeProvider>
             <NavigationContainer

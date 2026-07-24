@@ -21,14 +21,14 @@ import { useNavigation } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons as Icon } from "@expo/vector-icons";
 import { AuthContext } from "../context/AuthContext";
-import { loginUser } from "../services/api";
+import { loginUser, getMyPermissions } from "../services/api";
 
 const LoginBgimg = require("../../assets/images/logo.png");
 const { width } = Dimensions.get("window");
 
 const Login = () => {
   // ✅ FIX: include setUserName
-  const { setUserToken, setUserName, setUserRole } = useContext(AuthContext);
+  const { setUserToken, setUserName, setUserRole, setPermissions } = useContext(AuthContext);
 
   const navigation = useNavigation();
   const theme = useColorScheme();
@@ -78,6 +78,14 @@ const Login = () => {
 
         // ✅ Save role so the sidebar/screens can gate access
         await AsyncStorage.setItem("role", role);
+
+        // ✅ Fetch this user's effective menu permissions (admin gets all-true from the backend)
+        try {
+          const permsRes = await getMyPermissions();
+          setPermissions(permsRes.ok ? permsRes.data.data : null);
+        } catch (e) {
+          setPermissions(null);
+        }
 
         // ✅ Update global context
         setUserToken(token);

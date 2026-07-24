@@ -21,8 +21,10 @@ import {
 } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { getPatients } from "../services/api";
+import { getPatients, deletePatient } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
+import { AuthContext } from "../context/AuthContext";
+import { hasPermission } from "../utils/permissions";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -246,6 +248,10 @@ const PatientListScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const { theme, mode } = useContext(ThemeContext);
+  const { permissions } = useContext(AuthContext);
+  const canAddPatient = hasPermission(permissions, "patients", "add");
+  const canEditPatient = hasPermission(permissions, "patients", "edit");
+  const canDeletePatient = hasPermission(permissions, "patients", "delete");
 
   // 🔥 FULL DATA ALWAYS (from API)
   const [allPatients, setAllPatients] = useState([]);
@@ -314,6 +320,33 @@ const PatientListScreen = () => {
       Alert.alert("Network Error", "Unable to fetch patient list");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeletePatient = (item) => {
+    const patientId = item?.id || item?.patient_id;
+    const doDelete = async () => {
+      const res = await deletePatient(patientId);
+      if (res.ok) {
+        loadPatients();
+      } else {
+        Alert.alert("Error", res.data?.detail || res.data?.message || "Failed to delete patient.");
+      }
+    };
+
+    if (Platform.OS === "web") {
+      if (window.confirm(`Delete patient ${item?.name || patientId}? This also removes their appointments and treatment history.`)) {
+        doDelete();
+      }
+    } else {
+      Alert.alert(
+        "Delete Patient",
+        `Delete ${item?.name || patientId}? This also removes their appointments and treatment history.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: doDelete },
+        ]
+      );
     }
   };
 
@@ -578,11 +611,15 @@ const PatientListScreen = () => {
         <TouchableOpacity
           key={`row-${item?.id ?? index}`}
           activeOpacity={0.9}
-          onPress={() =>
-            navigation.navigate("Registration", {
-              patient: item,
-              mode: "edit",
-            })
+          disabled={!canEditPatient}
+          onPress={
+            canEditPatient
+              ? () =>
+                  navigation.navigate("Registration", {
+                    patient: item,
+                    mode: "edit",
+                  })
+              : undefined
           }
           style={[
             styles.mobileRow,
@@ -621,6 +658,16 @@ const PatientListScreen = () => {
               <Text style={[styles.mobileChipText, { color: theme.text }]}>Referral: {safeString(item.mode_of_referral)}</Text>
             </View>
           ) : null}
+
+          {canDeletePatient && (
+            <TouchableOpacity
+              onPress={() => handleDeletePatient(item)}
+              style={styles.mobileDeleteBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon name="trash-outline" size={16} color="#ef4444" />
+            </TouchableOpacity>
+          )}
         </TouchableOpacity>
       );
     }
@@ -734,24 +781,35 @@ const PatientListScreen = () => {
           );
         })}
 
-        <TouchableOpacity
-          style={styles.editBtn}
-          onPress={() =>
-            navigation.navigate("Registration", {
-              patient: item,
-              mode: "edit",
-            })
-          }
-        >
-          <View
-            style={[
-              styles.editIconWrap,
-              { backgroundColor: theme.primary + "22" },
-            ]}
-          >
-            <Icon name="create-outline" size={18} color={theme.primary} />
-          </View>
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", width: 80, justifyContent: "flex-end", gap: 6 }}>
+          {canEditPatient && (
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() =>
+                navigation.navigate("Registration", {
+                  patient: item,
+                  mode: "edit",
+                })
+              }
+            >
+              <View
+                style={[
+                  styles.editIconWrap,
+                  { backgroundColor: theme.primary + "22" },
+                ]}
+              >
+                <Icon name="create-outline" size={18} color={theme.primary} />
+              </View>
+            </TouchableOpacity>
+          )}
+          {canDeletePatient && (
+            <TouchableOpacity style={styles.editBtn} onPress={() => handleDeletePatient(item)}>
+              <View style={[styles.editIconWrap, { backgroundColor: "#ef444422" }]}>
+                <Icon name="trash-outline" size={18} color="#ef4444" />
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     );
   };
@@ -943,17 +1001,19 @@ const PatientListScreen = () => {
               </TouchableOpacity>
 
               {/* ADD BTN */}
-              <TouchableOpacity
-                style={[
-                  styles.addBtn,
-                  { backgroundColor: theme.primary },
-                ]}
-                onPress={() => navigation.navigate("Registration", { mode: "add" })}
-                activeOpacity={0.9}
-              >
-                <Icon name="add" size={20} color="#fff" />
-                {isWeb && <Text style={styles.addBtnText}>Add Patient</Text>}
-              </TouchableOpacity>
+              {canAddPatient && (
+                <TouchableOpacity
+                  style={[
+                    styles.addBtn,
+                    { backgroundColor: theme.primary },
+                  ]}
+                  onPress={() => navigation.navigate("Registration", { mode: "add" })}
+                  activeOpacity={0.9}
+                >
+                  <Icon name="add" size={20} color="#fff" />
+                  {isWeb && <Text style={styles.addBtnText}>Add Patient</Text>}
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </View>
 
@@ -1752,6 +1812,12 @@ const styles = StyleSheet.create({
   mobileChipText: {
     fontSize: 12,
     fontWeight: "700",
+  },
+
+  mobileDeleteBtn: {
+    alignSelf: "flex-end",
+    marginTop: 10,
+    padding: 4,
   },
 
   paginationWrap: {

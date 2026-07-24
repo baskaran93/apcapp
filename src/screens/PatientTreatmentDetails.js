@@ -16,8 +16,10 @@ import {
     Dimensions,
     KeyboardAvoidingView,
 } from "react-native";
-import { getPatients, getTreatmentCharges, registerTreatment, getTreatmentHistory, getDistinctDiagnoses, getDistinctPhysiotherapists } from "../services/api";
+import { getPatients, getTreatmentCharges, registerTreatment, getTreatmentHistory, getDistinctDiagnoses, getDistinctPhysiotherapists, deleteTreatment } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
+import { AuthContext } from "../context/AuthContext";
+import { hasPermission } from "../utils/permissions";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { Ionicons as Icon } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -33,6 +35,9 @@ const PatientTreatmentDetails = () => {
     const navigation = useNavigation();
     const route = useRoute();
     const { theme, mode: themeMode } = useContext(ThemeContext);
+    const { permissions } = useContext(AuthContext);
+    const canAddTreatment = hasPermission(permissions, "patient_treatment", "add");
+    const canDeleteTreatment = hasPermission(permissions, "patient_treatment", "delete");
     const isDark = themeMode === "dark";
     const isWeb = Platform.OS === "web";
 
@@ -155,6 +160,30 @@ const PatientTreatmentDetails = () => {
         } catch (error) {
             console.error("HISTORY LOAD ERROR", error);
             setTreatmentHistory([]);
+        }
+    };
+
+    const handleDeleteTreatment = (session) => {
+        const doDelete = async () => {
+            const res = await deleteTreatment(session.id);
+            if (res.ok) {
+                if (selectedPatient) loadHistory(selectedPatient.id);
+            } else {
+                Alert.alert("Error", res.data?.detail || "Failed to delete treatment record.");
+            }
+        };
+
+        if (Platform.OS === "web") {
+            if (window.confirm(`Delete this treatment record from ${new Date(session.treatment_date).toLocaleDateString()}?`)) doDelete();
+        } else {
+            Alert.alert(
+                "Delete Treatment",
+                `Delete this treatment record from ${new Date(session.treatment_date).toLocaleDateString()}?`,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Delete", style: "destructive", onPress: doDelete },
+                ]
+            );
         }
     };
 
@@ -538,9 +567,13 @@ const PatientTreatmentDetails = () => {
                         <Icon name="chevron-back" size={24} color={theme.text} />
                     </TouchableOpacity>
                     <Text style={[styles.headerTitle, { color: theme.text }]}>Patient Treatment</Text>
-                    <TouchableOpacity onPress={handleSave} disabled={submitting} style={styles.circleBtn}>
-                        {submitting ? <ActivityIndicator size="small" color={theme.primary} /> : <Icon name="checkmark" size={24} color={theme.primary} />}
-                    </TouchableOpacity>
+                    {canAddTreatment ? (
+                        <TouchableOpacity onPress={handleSave} disabled={submitting} style={styles.circleBtn}>
+                            {submitting ? <ActivityIndicator size="small" color={theme.primary} /> : <Icon name="checkmark" size={24} color={theme.primary} />}
+                        </TouchableOpacity>
+                    ) : (
+                        <View style={styles.circleBtn} />
+                    )}
                 </View>
 
                 <KeyboardAvoidingView
@@ -757,6 +790,11 @@ const PatientTreatmentDetails = () => {
                                                 <Icon name="print-outline" size={14} color="#64748b" />
                                                 <Text style={{ color: "#64748b", fontSize: 11, fontWeight: '700', marginLeft: 4 }}>A4</Text>
                                             </TouchableOpacity>
+                                            {canDeleteTreatment && (
+                                                <TouchableOpacity onPress={() => handleDeleteTreatment(h)} style={[styles.miniBtn, { backgroundColor: "#ef444418" }]}>
+                                                    <Icon name="trash-outline" size={14} color="#ef4444" />
+                                                </TouchableOpacity>
+                                            )}
                                         </View>
                                     </View>
                                 </View>

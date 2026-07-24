@@ -14,19 +14,26 @@ import {
     KeyboardAvoidingView,
     Platform,
 } from "react-native";
-import { getTreatmentCharges, addTreatmentCharge } from "../services/api";
+import { getTreatmentCharges, addTreatmentCharge, updateTreatmentCharge, deleteTreatmentCharge } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
+import { AuthContext } from "../context/AuthContext";
+import { hasPermission } from "../utils/permissions";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons as Icon } from "@expo/vector-icons";
 
 const TreatmentChargesMaster = () => {
     const navigation = useNavigation();
     const { theme, mode } = useContext(ThemeContext);
+    const { permissions } = useContext(AuthContext);
+    const canAdd = hasPermission(permissions, "treatment_charges", "add");
+    const canEdit = hasPermission(permissions, "treatment_charges", "edit");
+    const canDelete = hasPermission(permissions, "treatment_charges", "delete");
 
     const [charges, setCharges] = useState([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [modalVisible, setModalVisible] = useState(false);
+    const [editingCharge, setEditingCharge] = useState(null);
 
     // Form State
     const [treatmentName, setTreatmentName] = useState("");
@@ -62,8 +69,24 @@ const TreatmentChargesMaster = () => {
         loadCharges();
     };
 
-    /* ➕ ADD CHARGE */
-    const handleAddCharge = async () => {
+    const openAddModal = () => {
+        setEditingCharge(null);
+        setTreatmentName("");
+        setCost("");
+        setDescription("");
+        setModalVisible(true);
+    };
+
+    const openEditModal = (charge) => {
+        setEditingCharge(charge);
+        setTreatmentName(charge.treatment_name);
+        setCost(String(charge.cost));
+        setDescription(charge.description || "");
+        setModalVisible(true);
+    };
+
+    /* ➕ ADD / ✏️ EDIT CHARGE */
+    const handleSaveCharge = async () => {
         if (!treatmentName.trim() || !cost.trim()) {
             Alert.alert("Validation", "Treatment Name and Cost are required.");
             return;
@@ -77,22 +100,46 @@ const TreatmentChargesMaster = () => {
                 description: description,
             };
 
-            const response = await addTreatmentCharge(payload);
+            const response = editingCharge
+                ? await updateTreatmentCharge(editingCharge.id, payload)
+                : await addTreatmentCharge(payload);
+
             if (response.ok) {
-                Alert.alert("Success", "Treatment charge added successfully.");
+                Alert.alert("Success", editingCharge ? "Treatment charge updated successfully." : "Treatment charge added successfully.");
                 setModalVisible(false);
+                setEditingCharge(null);
                 setTreatmentName("");
                 setCost("");
                 setDescription("");
                 loadCharges();
             } else {
-                Alert.alert("Error", "Failed to add treatment charge.");
+                Alert.alert("Error", response.data?.detail || "Failed to save treatment charge.");
             }
         } catch (error) {
-            console.error("ADD ERROR", error);
+            console.error("SAVE ERROR", error);
             Alert.alert("Error", "An unexpected error occurred.");
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    const handleDeleteCharge = (charge) => {
+        const doDelete = async () => {
+            const res = await deleteTreatmentCharge(charge.id);
+            if (res.ok) {
+                loadCharges();
+            } else {
+                Alert.alert("Error", res.data?.detail || "Failed to delete treatment charge.");
+            }
+        };
+
+        if (Platform.OS === "web") {
+            if (window.confirm(`Delete "${charge.treatment_name}"?`)) doDelete();
+        } else {
+            Alert.alert("Delete Charge", `Delete "${charge.treatment_name}"?`, [
+                { text: "Cancel", style: "cancel" },
+                { text: "Delete", style: "destructive", onPress: doDelete },
+            ]);
         }
     };
 
@@ -105,6 +152,20 @@ const TreatmentChargesMaster = () => {
             </View>
             {item.description && (
                 <Text style={[styles.description, { color: theme.subText }]}>{item.description}</Text>
+            )}
+            {(canEdit || canDelete) && (
+                <View style={styles.rowActions}>
+                    {canEdit && (
+                        <TouchableOpacity onPress={() => openEditModal(item)} style={styles.rowActionBtn}>
+                            <Icon name="create-outline" size={18} color={theme.primary} />
+                        </TouchableOpacity>
+                    )}
+                    {canDelete && (
+                        <TouchableOpacity onPress={() => handleDeleteCharge(item)} style={styles.rowActionBtn}>
+                            <Icon name="trash-outline" size={18} color="#ef4444" />
+                        </TouchableOpacity>
+                    )}
+                </View>
             )}
         </View>
     );
@@ -130,9 +191,13 @@ const TreatmentChargesMaster = () => {
                     <Icon name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>Treatment Charges</Text>
-                <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.addBtnHeader}>
-                    <Icon name="add" size={26} color={theme.primary} />
-                </TouchableOpacity>
+                {canAdd ? (
+                    <TouchableOpacity onPress={openAddModal} style={styles.addBtnHeader}>
+                        <Icon name="add" size={26} color={theme.primary} />
+                    </TouchableOpacity>
+                ) : (
+                    <View style={styles.addBtnHeader} />
+                )}
             </View>
 
             {/* BODY */}
@@ -152,7 +217,7 @@ const TreatmentChargesMaster = () => {
                 />
             </View>
 
-            {/* ADD MODAL */}
+            {/* ADD / EDIT MODAL */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -165,7 +230,9 @@ const TreatmentChargesMaster = () => {
                 >
                     <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
                         <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: theme.text }]}>Add New Charge</Text>
+                            <Text style={[styles.modalTitle, { color: theme.text }]}>
+                                {editingCharge ? "Edit Charge" : "Add New Charge"}
+                            </Text>
                             <TouchableOpacity onPress={() => setModalVisible(false)}>
                                 <Icon name="close" size={24} color={theme.subText} />
                             </TouchableOpacity>
@@ -208,13 +275,13 @@ const TreatmentChargesMaster = () => {
 
                         <TouchableOpacity
                             style={[styles.saveBtn, { backgroundColor: theme.primary }]}
-                            onPress={handleAddCharge}
+                            onPress={handleSaveCharge}
                             disabled={submitting}
                         >
                             {submitting ? (
                                 <ActivityIndicator color="#fff" />
                             ) : (
-                                <Text style={styles.saveBtnText}>Save Charge</Text>
+                                <Text style={styles.saveBtnText}>{editingCharge ? "Update Charge" : "Save Charge"}</Text>
                             )}
                         </TouchableOpacity>
                     </View>
@@ -238,7 +305,7 @@ const styles = StyleSheet.create({
     },
     headerTitle: { fontSize: 18, fontWeight: "700" },
     backBtn: { padding: 5 },
-    addBtnHeader: { padding: 5 },
+    addBtnHeader: { padding: 5, width: 36 },
     container: { flex: 1, padding: 15 },
     card: {
         padding: 15,
@@ -256,6 +323,13 @@ const styles = StyleSheet.create({
     treatmentName: { fontSize: 16, fontWeight: "600" },
     cost: { fontSize: 16, fontWeight: "700" },
     description: { fontSize: 14, fontStyle: "italic" },
+    rowActions: {
+        flexDirection: "row",
+        justifyContent: "flex-end",
+        gap: 12,
+        marginTop: 10,
+    },
+    rowActionBtn: { padding: 4 },
 
     // Modal Styles
     modalOverlay: {
