@@ -291,6 +291,24 @@ export const registerTreatment = async (payload) => {
   }
 };
 
+export const getAllTreatmentHistory = async () => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/patient/treatement/history/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get All Treatment History Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
 export const getTreatmentHistory = async (patientId) => {
   try {
     const token = await AsyncStorage.getItem("token");

@@ -29,12 +29,14 @@ import AppointmentScreen from "./src/screens/AppointmentScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
 import UserManagementScreen from "./src/screens/UserManagementScreen";
 import MenuRightsScreen from "./src/screens/MenuRightsScreen";
+import TreatmentHistoryScreen from "./src/screens/TreatmentHistoryScreen";
 
 const MENU_BY_ROUTE = {
   Patients: "patients",
   Appointments: "appointments",
   "Treatment Charges": "treatment_charges",
   "Patient Treatment": "patient_treatment",
+  "Treatment History": "patient_treatment",
 };
 
 const Drawer = createDrawerNavigator();
@@ -119,6 +121,7 @@ function CustomDrawerContent(props) {
               Appointments: "calendar-clock",
               "Treatment Charges": "cash-multiple",
               "Patient Treatment": "medical-bag",
+              "Treatment History": "history",
             };
 
             const iconName = iconMap[route.name] || "circle-outline";
@@ -289,6 +292,10 @@ function DrawerNavigator() {
       <Drawer.Screen
         name="Patient Treatment"
         component={withPermissionGuard(PatientTreatmentDetails, "patient_treatment")}
+      />
+      <Drawer.Screen
+        name="Treatment History"
+        component={withPermissionGuard(TreatmentHistoryScreen, "patient_treatment")}
       />
       <Drawer.Screen name="Settings" component={SettingsScreen} />
       <Drawer.Screen
