@@ -632,3 +632,26 @@ export const registerUser = async (username, password, role) => {
     return { ok: false, data: null, error: String(error) };
   }
 };
+
+export const updateUser = async (userId, { role, newPassword } = {}) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const payload = {};
+    if (role !== undefined) payload.role = role;
+    if (newPassword) payload.new_password = newPassword;
+
+    const response = await fetch(`${BASE_URL}/user/${userId}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Update User Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};

@@ -21,7 +21,7 @@ import { Ionicons as Icon } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 
 import { ThemeContext } from "../theme/ThemeContext";
-import { getUsers, registerUser } from "../services/api";
+import { getUsers, registerUser, updateUser } from "../services/api";
 
 const ROLE_OPTIONS = ["admin", "doctor", "receptionist"];
 
@@ -160,6 +160,132 @@ function AddUserModal({ visible, onClose, onCreated, isDark, theme }) {
   );
 }
 
+function EditUserModal({ visible, user, onClose, onSaved, isDark, theme }) {
+  const [role, setRole] = useState(user?.role || "receptionist");
+  const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Keep local state in sync whenever a different user is opened for editing
+  React.useEffect(() => {
+    setRole(user?.role || "receptionist");
+    setNewPassword("");
+    setShowPassword(false);
+  }, [user]);
+
+  const close = () => {
+    setNewPassword("");
+    setShowPassword(false);
+    onClose();
+  };
+
+  const handleSave = async () => {
+    if (!user) return;
+    try {
+      setSaving(true);
+      const res = await updateUser(user.id, {
+        role,
+        newPassword: newPassword.trim() || undefined,
+      });
+      if (res.ok) {
+        notify("Success", `User "${user.username}" updated.`);
+        close();
+        onSaved();
+      } else {
+        notify("Error", res.data?.detail || res.data?.message || "Failed to update user.");
+      }
+    } catch (e) {
+      notify("Network Error", "Unable to connect to server");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!user) return null;
+
+  return (
+    <Modal transparent animationType="slide" visible={visible} onRequestClose={close}>
+      <KeyboardAvoidingView style={styles.sheetOverlay} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={close} />
+        <View style={[styles.sheetCard, { backgroundColor: isDark ? "#0f172a" : "#ffffff" }]}>
+          <View style={styles.sheetHeader}>
+            <Text style={[styles.sheetTitle, { color: isDark ? "#fff" : "#0f172a" }]}>Edit User</Text>
+            <TouchableOpacity onPress={close}>
+              <Icon name="close" size={24} color={isDark ? "#94a3b8" : "#64748b"} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569" }]}>Username</Text>
+            <View
+              style={[
+                styles.inputWrap,
+                { backgroundColor: isDark ? "rgba(255,255,255,0.03)" : "rgba(15,23,42,0.03)", borderColor: isDark ? "rgba(255,255,255,0.10)" : "#e5e7eb" },
+              ]}
+            >
+              <Icon name="person-outline" size={18} color={isDark ? "#94a3b8" : "#64748b"} />
+              <Text style={[styles.textInput, { color: isDark ? "#94a3b8" : "#64748b" }]}>{user.username}</Text>
+            </View>
+
+            <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569", marginTop: 14 }]}>Role</Text>
+            <View style={styles.roleRow}>
+              {ROLE_OPTIONS.map((r) => {
+                const active = role === r;
+                return (
+                  <TouchableOpacity
+                    key={r}
+                    onPress={() => setRole(r)}
+                    style={[
+                      styles.roleChip,
+                      {
+                        backgroundColor: active ? ROLE_COLORS[r] : (isDark ? "rgba(255,255,255,0.06)" : "rgba(15,23,42,0.05)"),
+                        borderColor: active ? ROLE_COLORS[r] : (isDark ? "rgba(255,255,255,0.10)" : "#e5e7eb"),
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: active ? "#fff" : theme.text, fontWeight: "700", textTransform: "capitalize" }}>
+                      {r}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569", marginTop: 14 }]}>
+              Reset Password (optional)
+            </Text>
+            <View style={[styles.inputWrap, { backgroundColor: isDark ? "rgba(15,23,42,0.75)" : "rgba(248,250,252,0.95)", borderColor: isDark ? "rgba(255,255,255,0.10)" : "#e5e7eb" }]}>
+              <Icon name="lock-closed-outline" size={18} color={isDark ? "#94a3b8" : "#64748b"} />
+              <TextInput
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry={!showPassword}
+                placeholder="Leave blank to keep current password"
+                placeholderTextColor="#94a3b8"
+                style={[styles.textInput, { color: isDark ? "#fff" : "#0f172a" }]}
+              />
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                <Icon name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={isDark ? "#94a3b8" : "#64748b"} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity disabled={saving} onPress={handleSave} activeOpacity={0.9} style={{ marginTop: 20 }}>
+              <LinearGradient
+                colors={isDark ? ["#2563eb", "#06b6d4"] : ["#2563eb", "#7c3aed"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[styles.saveBtn, { opacity: saving ? 0.85 : 1 }]}
+              >
+                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
+              </LinearGradient>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 const UserManagementScreen = () => {
   const { theme, mode } = useContext(ThemeContext);
   const isDark = mode === "dark";
@@ -167,6 +293,7 @@ const UserManagementScreen = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -199,6 +326,9 @@ const UserManagementScreen = () => {
           {item.role}
         </Text>
       </View>
+      <TouchableOpacity onPress={() => setEditingUser(item)} style={styles.rowEditBtn}>
+        <Icon name="create-outline" size={18} color={theme.primary} />
+      </TouchableOpacity>
     </View>
   );
 
@@ -239,6 +369,15 @@ const UserManagementScreen = () => {
         theme={theme}
         onClose={() => setModalVisible(false)}
         onCreated={loadUsers}
+      />
+
+      <EditUserModal
+        visible={!!editingUser}
+        user={editingUser}
+        isDark={isDark}
+        theme={theme}
+        onClose={() => setEditingUser(null)}
+        onSaved={loadUsers}
       />
     </SafeAreaView>
   );
@@ -288,6 +427,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 10,
+  },
+  rowEditBtn: {
+    marginLeft: 10,
+    padding: 4,
   },
 
   sheetOverlay: { flex: 1, justifyContent: "flex-end" },
