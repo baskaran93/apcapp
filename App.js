@@ -1,25 +1,132 @@
-// App.js (FINAL GLOBAL VERSION)
-
-import React, { useState, createContext } from "react";
-import { NavigationContainer } from "@react-navigation/native";
 import "react-native-gesture-handler";
+import React, { useState, useEffect, Component } from "react";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import * as SplashScreen from "expo-splash-screen";
+import { NavigationContainer } from "@react-navigation/native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { ThemeProvider } from "./src/theme/ThemeContext";
+import { AuthContext } from "./src/context/AuthContext";
 import AuthNavigator from "./AuthNavigator";
 import AppNavigator from "./AppNavigator";
 
-export const AuthContext = createContext();
+// Prevent splash screen from auto-hiding
+SplashScreen.preventAutoHideAsync().catch(() => { });
+
+class ErrorBoundary extends Component {
+  state = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("[ErrorBoundary] Caught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>App Crashed 😢</Text>
+          <Text style={styles.errorText}>
+            {this.state.error ? this.state.error.toString() : "Unknown error"}
+          </Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => this.setState({ hasError: false, error: null })}
+          >
+            <Text style={{ color: "#fff", fontWeight: "bold" }}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
-  const [userToken, setUserToken] = useState(null); // start logged out
+  const [userToken, setUserToken] = useState(null);
+  const [userName, setUserName] = useState("");
+  const [userRole, setUserRole] = useState("");
+  const [isReady, setIsReady] = useState(false);
+
+  console.log("[App] Rendering full application component...");
+
+  useEffect(() => {
+    console.log("[App] Effect running. Initializing...");
+
+    const prepare = async () => {
+      try {
+        console.log("[App] Hiding splash screen manually...");
+        await SplashScreen.hideAsync();
+        console.log("[App] Splash screen hidden.");
+      } catch (e) {
+        console.warn("[App] Error hiding splash screen:", e);
+      } finally {
+        setIsReady(true);
+      }
+    };
+
+    prepare();
+
+    // Fallback timer to force ready state and hide splash
+    const timer = setTimeout(() => {
+      console.log("[App] Fallback timer triggered.");
+      SplashScreen.hideAsync().catch(() => { });
+      setIsReady(true);
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!isReady) {
+    console.log("[App] Not ready yet, showing nothing...");
+    return null;
+  }
 
   return (
-    <AuthContext.Provider value={{ userToken, setUserToken }}>
-      🔥{/* GLOBAL THEME PROVIDER */}
-      <ThemeProvider>
-        <NavigationContainer>
-          {userToken ? <AppNavigator /> : <AuthNavigator />}
-        </NavigationContainer>
-      </ThemeProvider>
-    </AuthContext.Provider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ErrorBoundary>
+        <AuthContext.Provider
+          value={{ userToken, setUserToken, userName, setUserName, userRole, setUserRole }}
+        >
+          <ThemeProvider>
+            <NavigationContainer
+              onReady={() => console.log("[App] Navigation Container Ready")}
+              onStateChange={(state) => console.log("[App] Navigation State Changed")}
+            >
+              {userToken ? <AppNavigator /> : <AuthNavigator />}
+            </NavigationContainer>
+          </ThemeProvider>
+        </AuthContext.Provider>
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    backgroundColor: "#fff"
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 10,
+    color: "red"
+  },
+  errorText: {
+    fontSize: 14,
+    color: "#444",
+    textAlign: "center",
+    marginBottom: 20
+  },
+  retryBtn: {
+    padding: 12,
+    backgroundColor: "#2563eb",
+    borderRadius: 8
+  }
+});
