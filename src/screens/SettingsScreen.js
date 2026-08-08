@@ -318,6 +318,34 @@ const SettingsScreen = () => {
               isDark={isDark}
               theme={theme}
             />
+            <SettingRow
+              icon="briefcase-outline"
+              label="Designation Master"
+              onPress={() => navigation.navigate("Designation Master")}
+              isDark={isDark}
+              theme={theme}
+            />
+            <SettingRow
+              icon="share-social-outline"
+              label="Referral Type Master"
+              onPress={() => navigation.navigate("Referral Type Master")}
+              isDark={isDark}
+              theme={theme}
+            />
+            <SettingRow
+              icon="pricetag-outline"
+              label="Expense Master"
+              onPress={() => navigation.navigate("Expense Master")}
+              isDark={isDark}
+              theme={theme}
+            />
+            <SettingRow
+              icon="wallet-outline"
+              label="Office Expenses"
+              onPress={() => navigation.navigate("Office Expenses")}
+              isDark={isDark}
+              theme={theme}
+            />
           </>
         )}
       </View>

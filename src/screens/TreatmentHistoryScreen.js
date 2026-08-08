@@ -31,6 +31,7 @@ const TreatmentHistoryScreen = () => {
   const { permissions } = useContext(AuthContext);
   const isDark = mode === "dark";
   const canDelete = hasPermission(permissions, "patient_treatment", "delete");
+  const canEdit = hasPermission(permissions, "patient_treatment", "edit");
 
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +99,13 @@ const TreatmentHistoryScreen = () => {
     });
   };
 
+  const goToEdit = (item) => {
+    navigation.navigate("Patient Treatment", {
+      patient: { id: item.patient_id, name: item.patient_name, phone_number: item.patient_phone },
+      editingSession: item,
+    });
+  };
+
   const renderItem = ({ item }) => {
     const total = (item.items || []).reduce((s, it) => s + (it.cost || 0), 0);
     const expanded = expandedId === item.id;
@@ -132,6 +140,13 @@ const TreatmentHistoryScreen = () => {
               {expanded ? "Hide items" : `${item.items?.length || 0} item(s)`}
             </Text>
           </TouchableOpacity>
+
+          {canEdit && (
+            <TouchableOpacity onPress={() => goToEdit(item)} style={[styles.actionChip, { backgroundColor: theme.primary + "18" }]}>
+              <Icon name="create-outline" size={14} color={theme.primary} />
+              <Text style={{ color: theme.primary, fontSize: 12, fontWeight: "700", marginLeft: 4 }}>Edit</Text>
+            </TouchableOpacity>
+          )}
 
           {canDelete && (
             <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionChip, { backgroundColor: "#ef444418" }]}>

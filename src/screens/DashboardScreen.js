@@ -1,5 +1,5 @@
 // src/screens/DashboardScreen.js
-import React, { useContext, useEffect, useRef, useState, useCallback } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -14,7 +14,22 @@ import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { Ionicons as Icon } from "@expo/vector-icons";
 import { ThemeContext } from "../theme/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
-import { getDashboardSummary } from "../services/api";
+import { getDashboardSummary, getAppointments } from "../services/api";
+
+const STATUS_COLORS = {
+  Scheduled: "#3b82f6",
+  Completed: "#22c55e",
+  Cancelled: "#ef4444",
+};
+
+const formatApptDate = (val) => {
+  if (!val) return "—";
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return "—";
+  const datePart = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const timePart = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${datePart} · ${timePart}`;
+};
 
 export default function DashboardScreen() {
   const navigation = useNavigation();
@@ -51,6 +66,67 @@ export default function DashboardScreen() {
       loadSummary();
     }, [loadSummary])
   );
+
+  const [appointments, setAppointments] = useState([]);
+  const [apptLoading, setApptLoading] = useState(true);
+
+  const loadAppointments = useCallback(async () => {
+    try {
+      const res = await getAppointments();
+      if (res.ok && Array.isArray(res.data?.data)) {
+        setAppointments(res.data.data);
+      }
+    } catch (e) {
+      console.error("DASHBOARD APPOINTMENTS LOAD ERROR", e);
+    } finally {
+      setApptLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAppointments();
+  }, [loadAppointments]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadAppointments();
+    }, [loadAppointments])
+  );
+
+  // Last 7 days appointment trend (excludes cancelled)
+  const trendData = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      days.push({
+        key: d.toISOString().slice(0, 10),
+        label: d.toLocaleDateString("en-US", { weekday: "short" }),
+        value: 0,
+      });
+    }
+    appointments.forEach((a) => {
+      if (!a.appointment_date || a.status === "Cancelled") return;
+      const key = String(a.appointment_date).slice(0, 10);
+      const day = days.find((d) => d.key === key);
+      if (day) day.value += 1;
+    });
+    return days;
+  }, [appointments]);
+
+  const statusCounts = useMemo(() => {
+    const counts = { Scheduled: 0, Completed: 0, Cancelled: 0 };
+    appointments.forEach((a) => {
+      if (counts[a.status] !== undefined) counts[a.status] += 1;
+    });
+    return counts;
+  }, [appointments]);
+
+  const recentAppointments = useMemo(() => {
+    return [...appointments]
+      .sort((a, b) => new Date(b.appointment_date) - new Date(a.appointment_date))
+      .slice(0, 6);
+  }, [appointments]);
 
   const fmt = (val, prefix = "") =>
     summaryLoading || val === null || val === undefined ? "—" : `${prefix}${val}`;
@@ -263,24 +339,53 @@ export default function DashboardScreen() {
               width={cardWidth}
               theme={theme}
               mode={mode}
-              onPress={() => alert("Billing screen coming soon")}
+              onPress={() => navigation.navigate("Home", { screen: "Billing" })}
             />
           </View>
 
-          {/* ===== MODERN INFO CARD ===== */}
-          <View style={styles.infoCard}>
-            <View style={styles.infoIcon}>
-              <Icon name="sparkles-outline" size={20} color={theme.primary} />
-            </View>
-
-            <View style={{ flex: 1 }}>
-              <Text style={styles.infoTitle}>Tip</Text>
-              <Text style={styles.infoText}>
-                Add charts + recent appointments table to make this dashboard
-                look like a real ERP.
+          {/* ===== ANALYTICS ===== */}
+          <View style={styles.sectionHead}>
+            <View>
+              <Text style={styles.sectionTitle}>Analytics</Text>
+              <Text style={styles.sectionSub}>
+                Appointment trends & status at a glance
               </Text>
             </View>
           </View>
+
+          <View style={styles.gridRow}>
+            <View style={{ flex: 1, minWidth: 320 }}>
+              <TrendChart data={trendData} theme={theme} mode={mode} />
+            </View>
+
+            <View style={{ flex: 1, minWidth: 280 }}>
+              <StatusBreakdown counts={statusCounts} theme={theme} mode={mode} />
+            </View>
+          </View>
+
+          {/* ===== RECENT APPOINTMENTS ===== */}
+          <View style={styles.sectionHead}>
+            <View style={styles.sectionHeadRow}>
+              <View>
+                <Text style={styles.sectionTitle}>Recent Appointments</Text>
+                <Text style={styles.sectionSub}>Latest bookings across the clinic</Text>
+              </View>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => navigation.navigate("Home", { screen: "Appointments" })}
+              >
+                <Text style={styles.viewAllLink}>View All</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <RecentAppointmentsTable
+            items={recentAppointments}
+            loading={apptLoading}
+            theme={theme}
+            mode={mode}
+          />
 
           {/* ===== SPACE ===== */}
           <View style={{ height: 30 }} />
@@ -335,6 +440,184 @@ function KpiCard({ icon, label, value, accent, width, theme, mode }) {
           ]}
         />
       </View>
+    </View>
+  );
+}
+
+function TrendChart({ data, theme, mode }) {
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const borderColor = mode === "light" ? "#e5e7eb" : "#2a2a2a";
+
+  return (
+    <View
+      style={[
+        stylesGlobal.chartCard,
+        { backgroundColor: theme.card, borderColor },
+      ]}
+    >
+      <Text style={[stylesGlobal.chartTitle, { color: theme.text }]}>
+        Appointments · Last 7 Days
+      </Text>
+
+      <View style={stylesGlobal.barRow}>
+        {data.map((d) => (
+          <View key={d.key} style={stylesGlobal.barCol}>
+            <Text style={[stylesGlobal.barValue, { color: theme.subText }]}>
+              {d.value}
+            </Text>
+
+            <View
+              style={[
+                stylesGlobal.barTrack,
+                { backgroundColor: theme.primary + "1a" },
+              ]}
+            >
+              <View
+                style={[
+                  stylesGlobal.barFill,
+                  {
+                    height: `${(d.value / max) * 100}%`,
+                    backgroundColor: theme.primary,
+                  },
+                ]}
+              />
+            </View>
+
+            <Text style={[stylesGlobal.barLabel, { color: theme.subText }]}>
+              {d.label}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function StatusBreakdown({ counts, theme, mode }) {
+  const borderColor = mode === "light" ? "#e5e7eb" : "#2a2a2a";
+  const items = [
+    { key: "Scheduled", color: STATUS_COLORS.Scheduled, value: counts.Scheduled },
+    { key: "Completed", color: STATUS_COLORS.Completed, value: counts.Completed },
+    { key: "Cancelled", color: STATUS_COLORS.Cancelled, value: counts.Cancelled },
+  ];
+  const total = items.reduce((sum, it) => sum + it.value, 0);
+
+  return (
+    <View
+      style={[
+        stylesGlobal.chartCard,
+        { backgroundColor: theme.card, borderColor },
+      ]}
+    >
+      <Text style={[stylesGlobal.chartTitle, { color: theme.text }]}>
+        Appointment Status
+      </Text>
+
+      <View
+        style={[
+          stylesGlobal.stackedBarTrack,
+          { backgroundColor: mode === "light" ? "#e5e7eb" : "#1f2937" },
+        ]}
+      >
+        {total > 0 &&
+          items.map(
+            (it) =>
+              it.value > 0 && (
+                <View
+                  key={it.key}
+                  style={{ flex: it.value, backgroundColor: it.color }}
+                />
+              )
+          )}
+      </View>
+
+      <View style={stylesGlobal.legendWrap}>
+        {items.map((it) => (
+          <View key={it.key} style={stylesGlobal.legendItem}>
+            <View style={[stylesGlobal.legendDot, { backgroundColor: it.color }]} />
+            <Text style={[stylesGlobal.legendText, { color: theme.subText }]}>
+              {it.key} · {it.value}
+              {total ? ` (${Math.round((it.value / total) * 100)}%)` : ""}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function RecentAppointmentsTable({ items, loading, theme, mode }) {
+  const borderColor = mode === "light" ? "#e5e7eb" : "#2a2a2a";
+  const rowBorder = mode === "light" ? "#f1f5f9" : "#1f2937";
+
+  return (
+    <View style={[stylesGlobal.tableCard, { backgroundColor: theme.card, borderColor }]}>
+      <View style={stylesGlobal.tableHeadRow}>
+        <Text style={[stylesGlobal.tableHeadCell, { flex: 1.4, color: theme.subText }]}>
+          PATIENT
+        </Text>
+        <Text style={[stylesGlobal.tableHeadCell, { flex: 1.1, color: theme.subText }]}>
+          DOCTOR
+        </Text>
+        <Text style={[stylesGlobal.tableHeadCell, { flex: 1.2, color: theme.subText }]}>
+          DATE & TIME
+        </Text>
+        <Text
+          style={[
+            stylesGlobal.tableHeadCell,
+            { flex: 0.9, color: theme.subText, textAlign: "right" },
+          ]}
+        >
+          STATUS
+        </Text>
+      </View>
+
+      {loading ? (
+        <Text style={[stylesGlobal.tableEmptyText, { color: theme.subText }]}>
+          Loading appointments…
+        </Text>
+      ) : items.length === 0 ? (
+        <Text style={[stylesGlobal.tableEmptyText, { color: theme.subText }]}>
+          No appointments yet
+        </Text>
+      ) : (
+        items.map((item, idx) => {
+          const color = STATUS_COLORS[item.status] || "#94a3b8";
+          return (
+            <View
+              key={item.id ?? idx}
+              style={[
+                stylesGlobal.tableRow,
+                idx !== items.length - 1 && {
+                  borderBottomWidth: 1,
+                  borderBottomColor: rowBorder,
+                },
+              ]}
+            >
+              <Text
+                style={[stylesGlobal.tableCell, { flex: 1.4, color: theme.text, fontWeight: "700" }]}
+                numberOfLines={1}
+              >
+                {item.patient_name || "—"}
+              </Text>
+              <Text
+                style={[stylesGlobal.tableCell, { flex: 1.1, color: theme.subText }]}
+                numberOfLines={1}
+              >
+                {item.doctor_name || "—"}
+              </Text>
+              <Text style={[stylesGlobal.tableCell, { flex: 1.2, color: theme.subText }]}>
+                {formatApptDate(item.appointment_date)}
+              </Text>
+              <View style={{ flex: 0.9, alignItems: "flex-end" }}>
+                <View style={[stylesGlobal.statusBadge, { backgroundColor: color + "22" }]}>
+                  <Text style={[stylesGlobal.statusBadgeText, { color }]}>{item.status}</Text>
+                </View>
+              </View>
+            </View>
+          );
+        })
+      )}
     </View>
   );
 }
@@ -454,6 +737,12 @@ const getStyles = (theme, mode) =>
       marginBottom: 8,
     },
 
+    sectionHeadRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-end",
+    },
+
     sectionTitle: {
       fontSize: 20,
       fontWeight: "900",
@@ -466,37 +755,10 @@ const getStyles = (theme, mode) =>
       color: theme.subText,
     },
 
-    infoCard: {
-      marginTop: 26,
-      borderRadius: 22,
-      padding: 18,
-      flexDirection: "row",
-      gap: 14,
-      backgroundColor: theme.card,
-      borderWidth: 1,
-      borderColor: mode === "light" ? "#e5e7eb" : "#2a2a2a",
-    },
-
-    infoIcon: {
-      width: 42,
-      height: 42,
-      borderRadius: 14,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.primary + "22",
-    },
-
-    infoTitle: {
-      fontSize: 15,
-      fontWeight: "900",
-      color: theme.text,
-    },
-
-    infoText: {
-      marginTop: 4,
+    viewAllLink: {
       fontSize: 13,
-      lineHeight: 18,
-      color: theme.subText,
+      fontWeight: "700",
+      color: theme.primary,
     },
 
     /* ===== BACKGROUND BLOB STYLE ===== */
@@ -624,5 +886,166 @@ const stylesGlobal = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     fontWeight: "500",
+  },
+
+  /* ===== CHART CARD ===== */
+  chartCard: {
+    borderRadius: 26,
+    padding: 18,
+    borderWidth: 1,
+    minHeight: 210,
+
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOpacity: 0.08,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 8 },
+      },
+      android: {
+        elevation: 6,
+      },
+      web: {
+        boxShadow: "0px 10px 30px rgba(0,0,0,0.10)",
+      },
+    }),
+  },
+
+  chartTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  /* ===== BAR CHART ===== */
+  barRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    marginTop: 22,
+    height: 130,
+  },
+
+  barCol: {
+    flex: 1,
+    alignItems: "center",
+  },
+
+  barValue: {
+    fontSize: 11,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+
+  barTrack: {
+    width: 14,
+    height: 80,
+    borderRadius: 8,
+    overflow: "hidden",
+    justifyContent: "flex-end",
+  },
+
+  barFill: {
+    width: "100%",
+    borderRadius: 8,
+  },
+
+  barLabel: {
+    marginTop: 8,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+
+  /* ===== STATUS BREAKDOWN ===== */
+  stackedBarTrack: {
+    marginTop: 22,
+    height: 14,
+    borderRadius: 999,
+    overflow: "hidden",
+    flexDirection: "row",
+  },
+
+  legendWrap: {
+    marginTop: 18,
+    gap: 10,
+  },
+
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  legendDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 20,
+  },
+
+  legendText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  /* ===== RECENT APPOINTMENTS TABLE ===== */
+  tableCard: {
+    borderRadius: 26,
+    padding: 18,
+    borderWidth: 1,
+
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOpacity: 0.08,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 8 },
+      },
+      android: {
+        elevation: 6,
+      },
+      web: {
+        boxShadow: "0px 10px 30px rgba(0,0,0,0.10)",
+      },
+    }),
+  },
+
+  tableHeadRow: {
+    flexDirection: "row",
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(148,163,184,0.25)",
+  },
+
+  tableHeadCell: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+
+  tableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+  },
+
+  tableCell: {
+    fontSize: 13,
+    paddingRight: 8,
+  },
+
+  tableEmptyText: {
+    fontSize: 13,
+    textAlign: "center",
+    paddingVertical: 24,
+  },
+
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
   },
 });

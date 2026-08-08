@@ -16,7 +16,7 @@ import {
     Dimensions,
     KeyboardAvoidingView,
 } from "react-native";
-import { getPatients, getTreatmentCharges, registerTreatment, getTreatmentHistory, getDistinctDiagnoses, getDistinctPhysiotherapists, deleteTreatment } from "../services/api";
+import { getPatients, getTreatmentCharges, registerTreatment, updateTreatment, getTreatmentHistory, getDistinctDiagnoses, getDistinctPhysiotherapists, deleteTreatment } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
 import { AuthContext } from "../context/AuthContext";
 import { hasPermission } from "../utils/permissions";
@@ -26,6 +26,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import * as Print from "expo-print";
 import { Asset } from 'expo-asset';
 import logoBase64 from "../constants/logo_base64";
 
@@ -37,6 +38,7 @@ const PatientTreatmentDetails = () => {
     const { theme, mode: themeMode } = useContext(ThemeContext);
     const { permissions } = useContext(AuthContext);
     const canAddTreatment = hasPermission(permissions, "patient_treatment", "add");
+    const canEditTreatment = hasPermission(permissions, "patient_treatment", "edit");
     const canDeleteTreatment = hasPermission(permissions, "patient_treatment", "delete");
     const isDark = themeMode === "dark";
     const isWeb = Platform.OS === "web";
@@ -59,6 +61,8 @@ const PatientTreatmentDetails = () => {
     const [showTreatmentModal, setShowTreatmentModal] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [assessmentFile, setAssessmentFile] = useState(null);
+    const [editingSessionId, setEditingSessionId] = useState(null);
+    const [existingAssessmentFileName, setExistingAssessmentFileName] = useState(null);
 
     // New Master Treatment States
     const [showAddMasterModal, setShowAddMasterModal] = useState(false);
@@ -115,7 +119,26 @@ const PatientTreatmentDetails = () => {
             // clear the param so it doesn't re-trigger unnecessarily
             navigation.setParams({ patient: undefined });
         }
-    }, [route.params?.newTreatment, route.params?.patient]);
+
+        // Opened from Treatment History's Edit action: pre-fill the form
+        // from the existing session instead of starting a blank one.
+        if (route.params?.editingSession) {
+            const session = route.params.editingSession;
+            setEditingSessionId(session.id);
+            setDiagnosis(session.diagnosis || "");
+            setDoctorName(session.doctor_name || "");
+            setNotes(session.notes || "");
+            setSelectedTreatments(
+                (session.items || []).map((it, idx) => ({
+                    id: `existing-${idx}`,
+                    treatment_name: it.treatment_name,
+                    cost: it.cost,
+                }))
+            );
+            setExistingAssessmentFileName(session.has_assessment_file ? session.assessment_file_name : null);
+            navigation.setParams({ editingSession: undefined });
+        }
+    }, [route.params?.newTreatment, route.params?.patient, route.params?.editingSession]);
 
     // Also refresh on focus to be robust in case params were sent to drawer-level navigator
     useEffect(() => {
@@ -143,21 +166,30 @@ const PatientTreatmentDetails = () => {
             Alert.alert("Error", "Failed to pick document");
         }
     };
+
+    // Guards against a slow-loading patient's history landing after a
+    // faster-loading, more-recently-selected patient's, which would
+    // otherwise overwrite the currently displayed patient's history.
+    const historyRequestId = React.useRef(0);
+
     const loadHistory = async (patientId) => {
+        const requestId = ++historyRequestId.current;
         try {
             const response = await getTreatmentHistory(patientId);
+            if (requestId !== historyRequestId.current) return;
             if (response.ok) {
                 // Ensure we extract array from possible response formats
                 let data = [];
                 if (Array.isArray(response.data)) data = response.data;
                 else if (response.data?.results) data = response.data.results;
                 else if (response.data?.data) data = response.data.data;
-                
+
                 setTreatmentHistory(data);
             } else {
                 setTreatmentHistory([]);
             }
         } catch (error) {
+            if (requestId !== historyRequestId.current) return;
             console.error("HISTORY LOAD ERROR", error);
             setTreatmentHistory([]);
         }
@@ -254,125 +286,221 @@ const PatientTreatmentDetails = () => {
 
 
 
+    const escapeHtml = (value) => String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const buildBillHtml = (treatmentSession, format, logoData) => {
+        const isA5 = format.toLowerCase() === "a5";
+        const patientName = escapeHtml(selectedPatient?.name || selectedPatient?.patient_name || "N/A");
+        const itemsList = Array.isArray(treatmentSession.items) ? treatmentSession.items : [];
+        const total = itemsList.reduce((sum, item) => sum + Number(item.cost || 0), 0);
+        const rows = itemsList.map(item => `
+            <tr>
+                <td>${escapeHtml(item.treatment_name || "N/A")}</td>
+                <td class="amount">${Number(item.cost || 0).toFixed(2)}</td>
+            </tr>
+        `).join("");
+
+        return `
+        <html>
+        <head>
+            <meta charset="utf-8" />
+            <style>
+                @page { size: ${isA5 ? "A5" : "A4"}; margin: 14mm; }
+                body { font-family: Helvetica, Arial, sans-serif; color: #111; font-size: ${isA5 ? "10px" : "12px"}; }
+                .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-bottom: 12px; }
+                .logo { width: ${isA5 ? "60px" : "80px"}; height: ${isA5 ? "60px" : "80px"}; object-fit: contain; }
+                .address { text-align: right; font-size: ${isA5 ? "9px" : "10px"}; line-height: 1.4; }
+                .titles { display: flex; justify-content: space-between; font-weight: bold; font-size: ${isA5 ? "11px" : "13px"}; margin-bottom: 6px; }
+                .info { display: flex; justify-content: space-between; margin-bottom: 2px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                th, td { padding: 4px 0; text-align: left; }
+                th.amount, td.amount { text-align: right; }
+                thead th { border-bottom: 1px solid #333; font-weight: bold; }
+                tfoot td { border-top: 1px solid #333; font-weight: bold; padding-top: 6px; }
+                .notes { margin-top: 10px; font-size: ${isA5 ? "8px" : "9px"}; }
+                .footer { text-align: center; color: #999; font-size: 8px; margin-top: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                ${logoData ? `<img class="logo" src="${logoData}" />` : "<div></div>"}
+                <div class="address">
+                    <div>Siva Subramani Nagar, Kalapatti Main Rd</div>
+                    <div>Civil Aerodrome Post, Nehru Nagar West</div>
+                    <div>Coimbatore - 641010, Tamil Nadu</div>
+                    <div>Ph: +91 9791 348 748 / +91 8248 137 887</div>
+                </div>
+            </div>
+            <div class="titles">
+                <span>Patient</span>
+                <span>Invoice</span>
+            </div>
+            <div class="info">
+                <span>Name: ${patientName}</span>
+                <span>Date: ${new Date(treatmentSession.treatment_date).toLocaleDateString()}</span>
+            </div>
+            <div class="info">
+                <span>Phone: ${escapeHtml(selectedPatient?.phone_number || "N/A")}</span>
+                <span>Doctor: ${escapeHtml(treatmentSession.doctor_name || "N/A")}</span>
+            </div>
+            <div class="info">
+                <span>Age/DOB: ${escapeHtml(selectedPatient?.age || "N/A")}</span>
+                <span>Inv No: ${escapeHtml(treatmentSession.id || "")}</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Treatment Description</th>
+                        <th class="amount">Amount (₹)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td>Total</td>
+                        <td class="amount">${total.toFixed(2)}</td>
+                    </tr>
+                </tfoot>
+            </table>
+            ${treatmentSession.notes ? `<div class="notes">Notes: ${escapeHtml(treatmentSession.notes)}</div>` : ""}
+            <div class="footer">Computer Generated Invoice</div>
+        </body>
+        </html>
+        `;
+    };
+
     const generateBillPDF = async (treatmentSession, format = "a4") => {
         try {
-            const { jsPDF } = require("jspdf");
-            const isA5 = format.toLowerCase() === "a5";
-            const pdf = new jsPDF({ 
-                unit: "mm", 
-                format: isA5 ? "a5" : "a4", 
-                orientation: "portrait" 
-            });
-            
-            const pageWidth = pdf.internal.pageSize.getWidth();
-            const pageHeight = pdf.internal.pageSize.getHeight();
-            
-            // Scaling factors for A5 (A5 is roughly 70% of A4 in dimensions)
-            const scale = isA5 ? 0.75 : 1.0;
-            const M = 14 * scale; // margin
-            let y = M;
-
             const logoData = logoBase64 || await loadLogoBase64();
-            if (logoData) {
-                try {
-                    const logoW = 40 * scale;
-                    const logoH = 40 * scale;
-                    pdf.addImage(logoData, 'PNG', M, y - (4 * scale), logoW, logoH);
-                } catch (e1) {
-                    console.error('Failed to add logo image to PDF', e1);
-                }
-            }
-            
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(10 * scale);
-            const addrX = pageWidth - M - (isA5 ? 70 : 120);
-            pdf.text("Siva Subramani Nagar, Kalapatti Main Rd", addrX, y + (8 * scale));
-            pdf.text("Civil Aerodrome Post, Nehru Nagar West", addrX, y + (14 * scale));
-            pdf.text("Coimbatore - 641010, Tamil Nadu", addrX, y + (20 * scale));
-            pdf.text("Ph: +91 9791 348 748 / +91 8248 137 887", addrX, y + (26 * scale));
-            y += (isA5 ? 30 : 40);
-
-            pdf.setDrawColor(200);
-            pdf.setLineWidth(0.6 * scale);
-            pdf.line(M, y, pageWidth - M, y);
-            y += (8 * scale);
-
-            pdf.setFontSize(11 * scale);
-            pdf.setFont("helvetica", "bold");
-            pdf.text("Patient", M, y);
-            pdf.text("Invoice", pageWidth - M - (isA5 ? 25 : 40), y);
-            y += (6 * scale);
-
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(10 * scale);
-            const patientName = selectedPatient?.name || selectedPatient?.patient_name || "N/A";
-            pdf.text(`Name: ${patientName}`, M, y);
-            pdf.text(`Date: ${new Date(treatmentSession.treatment_date).toLocaleDateString()}`, pageWidth - M - (isA5 ? 25 : 40), y);
-            y += (6 * scale);
-            pdf.text(`Phone: ${selectedPatient?.phone_number || "N/A"}`, M, y);
-            pdf.text(`Doctor: ${treatmentSession.doctor_name || "N/A"}`, pageWidth - M - (isA5 ? 25 : 40), y);
-            y += (6 * scale);
-            pdf.text(`Age/DOB: ${selectedPatient?.age || "N/A"}`, M, y);
-            pdf.text(`Inv No: ${treatmentSession.id || ""}`, pageWidth - M - (isA5 ? 25 : 40), y);
-            y += (10 * scale);
-
-            pdf.setFont("helvetica", "bold");
-            pdf.setFontSize(11 * scale);
-            const col1X = M;
-            pdf.text("Treatment Description", col1X, y);
-            pdf.text("Amount (₹)", pageWidth - M, y, { align: "right" });
-            y += (6 * scale);
-            pdf.setLineWidth(0.4 * scale);
-            pdf.line(M, y, pageWidth - M, y);
-            y += (6 * scale);
-
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(10 * scale);
-            let total = 0;
-            const itemsList = Array.isArray(treatmentSession.items) ? treatmentSession.items : [];
-            for (let i = 0; i < itemsList.length; i++) {
-                const item = itemsList[i];
-                if (y > pageHeight - (20 * scale)) {
-                    pdf.addPage();
-                    y = M;
-                }
-                pdf.text(item.treatment_name || "N/A", col1X, y);
-                pdf.text(Number(item.cost || 0).toFixed(2), pageWidth - M, y, { align: "right" });
-                y += (6 * scale);
-                total += Number(item.cost || 0);
-            }
-
-            y += (6 * scale);
-            pdf.setLineWidth(0.5 * scale);
-            pdf.line(M, y, pageWidth - M, y);
-            y += (6 * scale);
-
-            pdf.setFont("helvetica", "bold");
-            pdf.text("Total", col1X, y);
-            pdf.text(total.toFixed(2), pageWidth - M, y, { align: "right" });
-            y += (12 * scale);
-
-            if (treatmentSession.notes) {
-                pdf.setFont("helvetica", "normal");
-                pdf.setFontSize(9 * scale);
-                pdf.text(`Notes: ${treatmentSession.notes}`, M, y);
-                y += (10 * scale);
-            }
-
-            pdf.setFontSize(8 * scale);
-            pdf.setTextColor(150);
-            pdf.text("Computer Generated Invoice", pageWidth / 2, pageHeight - M + (5 * scale), { align: "center" });
-
             const filename = `Bill_${format.toUpperCase()}.pdf`;
+
+            // jsPDF relies on browser-only APIs (Buffer/TextEncoder with latin1
+            // support) that Hermes/React Native doesn't provide, so it's only
+            // safe to use when actually running in a web browser.
             if (Platform.OS === "web") {
+                const { jsPDF } = require("jspdf");
+                const isA5 = format.toLowerCase() === "a5";
+                const pdf = new jsPDF({
+                    unit: "mm",
+                    format: isA5 ? "a5" : "a4",
+                    orientation: "portrait"
+                });
+
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+
+                // Scaling factors for A5 (A5 is roughly 70% of A4 in dimensions)
+                const scale = isA5 ? 0.75 : 1.0;
+                const M = 14 * scale; // margin
+                let y = M;
+
+                if (logoData) {
+                    try {
+                        const logoW = 40 * scale;
+                        const logoH = 40 * scale;
+                        pdf.addImage(logoData, 'PNG', M, y - (4 * scale), logoW, logoH);
+                    } catch (e1) {
+                        console.error('Failed to add logo image to PDF', e1);
+                    }
+                }
+
+                pdf.setFont("helvetica", "normal");
+                pdf.setFontSize(10 * scale);
+                const addrX = pageWidth - M - (isA5 ? 70 : 120);
+                pdf.text("Siva Subramani Nagar, Kalapatti Main Rd", addrX, y + (8 * scale));
+                pdf.text("Civil Aerodrome Post, Nehru Nagar West", addrX, y + (14 * scale));
+                pdf.text("Coimbatore - 641010, Tamil Nadu", addrX, y + (20 * scale));
+                pdf.text("Ph: +91 9791 348 748 / +91 8248 137 887", addrX, y + (26 * scale));
+                y += (isA5 ? 30 : 40);
+
+                pdf.setDrawColor(200);
+                pdf.setLineWidth(0.6 * scale);
+                pdf.line(M, y, pageWidth - M, y);
+                y += (8 * scale);
+
+                pdf.setFontSize(11 * scale);
+                pdf.setFont("helvetica", "bold");
+                pdf.text("Patient", M, y);
+                pdf.text("Invoice", pageWidth - M - (isA5 ? 25 : 40), y);
+                y += (6 * scale);
+
+                pdf.setFont("helvetica", "normal");
+                pdf.setFontSize(10 * scale);
+                const patientName = selectedPatient?.name || selectedPatient?.patient_name || "N/A";
+                pdf.text(`Name: ${patientName}`, M, y);
+                pdf.text(`Date: ${new Date(treatmentSession.treatment_date).toLocaleDateString()}`, pageWidth - M - (isA5 ? 25 : 40), y);
+                y += (6 * scale);
+                pdf.text(`Phone: ${selectedPatient?.phone_number || "N/A"}`, M, y);
+                pdf.text(`Doctor: ${treatmentSession.doctor_name || "N/A"}`, pageWidth - M - (isA5 ? 25 : 40), y);
+                y += (6 * scale);
+                pdf.text(`Age/DOB: ${selectedPatient?.age || "N/A"}`, M, y);
+                pdf.text(`Inv No: ${treatmentSession.id || ""}`, pageWidth - M - (isA5 ? 25 : 40), y);
+                y += (10 * scale);
+
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(11 * scale);
+                const col1X = M;
+                pdf.text("Treatment Description", col1X, y);
+                pdf.text("Amount (₹)", pageWidth - M, y, { align: "right" });
+                y += (6 * scale);
+                pdf.setLineWidth(0.4 * scale);
+                pdf.line(M, y, pageWidth - M, y);
+                y += (6 * scale);
+
+                pdf.setFont("helvetica", "normal");
+                pdf.setFontSize(10 * scale);
+                let total = 0;
+                const itemsList = Array.isArray(treatmentSession.items) ? treatmentSession.items : [];
+                for (let i = 0; i < itemsList.length; i++) {
+                    const item = itemsList[i];
+                    if (y > pageHeight - (20 * scale)) {
+                        pdf.addPage();
+                        y = M;
+                    }
+                    pdf.text(item.treatment_name || "N/A", col1X, y);
+                    pdf.text(Number(item.cost || 0).toFixed(2), pageWidth - M, y, { align: "right" });
+                    y += (6 * scale);
+                    total += Number(item.cost || 0);
+                }
+
+                y += (6 * scale);
+                pdf.setLineWidth(0.5 * scale);
+                pdf.line(M, y, pageWidth - M, y);
+                y += (6 * scale);
+
+                pdf.setFont("helvetica", "bold");
+                pdf.text("Total", col1X, y);
+                pdf.text(total.toFixed(2), pageWidth - M, y, { align: "right" });
+                y += (12 * scale);
+
+                if (treatmentSession.notes) {
+                    pdf.setFont("helvetica", "normal");
+                    pdf.setFontSize(9 * scale);
+                    pdf.text(`Notes: ${treatmentSession.notes}`, M, y);
+                    y += (10 * scale);
+                }
+
+                pdf.setFontSize(8 * scale);
+                pdf.setTextColor(150);
+                pdf.text("Computer Generated Invoice", pageWidth / 2, pageHeight - M + (5 * scale), { align: "center" });
+
                 pdf.save(filename);
-            } else {
-                const dataUri = pdf.output("datauristring");
-                const base64 = dataUri.split(",")[1];
-                const fileUri = FileSystem.documentDirectory + filename;
-                await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-                await Sharing.shareAsync(fileUri, { mimeType: "application/pdf" });
+                return;
             }
+
+            // Native (iOS/Android): render HTML to PDF via expo-print, which
+            // uses the platform's native renderer instead of jsPDF's
+            // browser-only encoding logic.
+            const html = buildBillHtml(treatmentSession, format, logoData);
+            const { uri } = await Print.printToFileAsync({ html, base64: false });
+            await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: filename, UTI: "com.adobe.pdf" });
         } catch (error) {
             console.error("PDF ERROR:", error);
             Alert.alert("Error", "Failed to generate PDF");
@@ -461,6 +589,31 @@ const PatientTreatmentDetails = () => {
     }, [patientSearch, patients]);
 
 
+    const MAX_ASSESSMENT_FILE_BYTES = 5 * 1024 * 1024; // 5MB
+
+    const readFileAsBase64 = async (file) => {
+        if (!file?.uri) return null;
+        try {
+            if (Platform.OS === "web") {
+                const response = await fetch(file.uri);
+                const blob = await response.blob();
+                return await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const dataUrl = String(reader.result || "");
+                        resolve(dataUrl.split(",")[1] || null);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+            }
+            return await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+        } catch (e) {
+            console.error("Failed to read assessment file", e);
+            return null;
+        }
+    };
+
     const handleSave = async () => {
         if (!selectedPatient) {
             Alert.alert("Validation", "Please select a patient.");
@@ -472,6 +625,10 @@ const PatientTreatmentDetails = () => {
         }
         if (selectedTreatments.length === 0) {
             Alert.alert("Validation", "Please add at least one treatment.");
+            return;
+        }
+        if (assessmentFile && assessmentFile.size && assessmentFile.size > MAX_ASSESSMENT_FILE_BYTES) {
+            Alert.alert("File too large", "Assessment form must be under 5MB.");
             return;
         }
 
@@ -494,24 +651,46 @@ const PatientTreatmentDetails = () => {
                 return;
             }
 
+            let assessmentFileBase64 = null;
+            if (assessmentFile) {
+                assessmentFileBase64 = await readFileAsBase64(assessmentFile);
+                if (!assessmentFileBase64) {
+                    Alert.alert("Warning", "Could not read the assessment file; saving treatment without it.");
+                }
+            }
+
             const payload = {
                 patient_id: patientId,
                 diagnosis: diagnosis.trim(),
-                treatment_plan: "Modern UI Visit", 
+                treatment_plan: "Modern UI Visit",
                 doctor_name: doctorName.trim() || "Consultant",
                 notes: notes.trim(),
-                items: items
+                items: items,
+                assessment_file_name: assessmentFileBase64 ? (assessmentFile?.name || null) : null,
+                assessment_file_base64: assessmentFileBase64,
             };
 
-            console.log("Submitting Treatment Payload:", JSON.stringify(payload, null, 2));
+            const response = editingSessionId
+                ? await updateTreatment(editingSessionId, payload)
+                : await registerTreatment(payload);
 
-            const response = await registerTreatment(payload);
-            
             if (response.ok) {
+                if (editingSessionId) {
+                    Alert.alert("Success", "Treatment updated successfully.");
+                    setEditingSessionId(null);
+                    setDiagnosis("");
+                    setSelectedTreatments([]);
+                    setNotes("");
+                    setAssessmentFile(null);
+                    setExistingAssessmentFileName(null);
+                    navigation.goBack();
+                    return;
+                }
+
                 Alert.alert("Success", "Treatment details registered successfully.", [
-                    { 
-                        text: "Download Bill (A5)", 
-                        onPress: () => generateBillPDF({ ...payload, treatment_date: new Date().toISOString() }, "a5") 
+                    {
+                        text: "Download Bill (A5)",
+                        onPress: () => generateBillPDF({ ...payload, treatment_date: new Date().toISOString() }, "a5")
                     },
                     { text: "OK" }
                 ]);
@@ -521,14 +700,14 @@ const PatientTreatmentDetails = () => {
                 setSelectedTreatments([]);
                 setNotes("");
                 setAssessmentFile(null);
-                
+
                 // Refresh history
-                loadHistory(patientId); 
+                loadHistory(patientId);
                 loadGlobalDiagnoses(); // Refresh global list too
                 loadPhysiotherapists(); // Refresh physiotherapists too
             } else {
                 console.error("SAVE FAILED:", response.data);
-                const errorMsg = response.data?.detail || response.data?.message || response.data?.error || "Failed to register treatment.";
+                const errorMsg = response.data?.detail || response.data?.message || response.data?.error || "Failed to save treatment.";
                 Alert.alert("Error", typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg));
             }
         } catch (error) {
@@ -566,8 +745,8 @@ const PatientTreatmentDetails = () => {
                     <TouchableOpacity onPress={() => navigation.goBack()} style={styles.circleBtn}>
                         <Icon name="chevron-back" size={24} color={theme.text} />
                     </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Patient Treatment</Text>
-                    {canAddTreatment ? (
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>{editingSessionId ? "Edit Treatment" : "Patient Treatment"}</Text>
+                    {(editingSessionId ? canEditTreatment : canAddTreatment) ? (
                         <TouchableOpacity onPress={handleSave} disabled={submitting} style={styles.circleBtn}>
                             {submitting ? <ActivityIndicator size="small" color={theme.primary} /> : <Icon name="checkmark" size={24} color={theme.primary} />}
                         </TouchableOpacity>
@@ -598,7 +777,7 @@ const PatientTreatmentDetails = () => {
                         {selectedPatient ? (
                             <View style={styles.patientSelected}>
                                 <View style={[styles.avatar, { backgroundColor: theme.primary }]}>
-                                    <Text style={styles.avatarText}>{selectedPatient.name.charAt(0).toUpperCase()}</Text>
+                                    <Text style={styles.avatarText}>{(selectedPatient.name || selectedPatient.patient_name || "?").charAt(0).toUpperCase()}</Text>
                                 </View>
                                 <View style={{ flex: 1 }}>
                                     <Text style={[styles.patientName, { color: theme.text }]}>{selectedPatient.name}</Text>
@@ -670,10 +849,14 @@ const PatientTreatmentDetails = () => {
                         {/* File Upload - lowered zIndex so suggestions from above float over */}
                         <View style={[styles.fieldGroup, { zIndex: 1, overflow: 'visible' }]}>
                             <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569" }]}>Assessment Form</Text>
-                            <TouchableOpacity onPress={handleFileUpload} style={[styles.uploadBox, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc", borderStyle: assessmentFile ? 'solid' : 'dashed' }]}>
-                                <Icon name={assessmentFile ? "document-text" : "cloud-upload-outline"} size={24} color={assessmentFile ? theme.primary : "#94a3b8"} />
-                                <Text style={[styles.uploadText, { color: assessmentFile ? theme.text : "#94a3b8" }]}>
-                                    {assessmentFile ? assessmentFile.name : "Upload Assessment Form"}
+                            <TouchableOpacity onPress={handleFileUpload} style={[styles.uploadBox, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc", borderStyle: (assessmentFile || existingAssessmentFileName) ? 'solid' : 'dashed' }]}>
+                                <Icon name={(assessmentFile || existingAssessmentFileName) ? "document-text" : "cloud-upload-outline"} size={24} color={(assessmentFile || existingAssessmentFileName) ? theme.primary : "#94a3b8"} />
+                                <Text style={[styles.uploadText, { color: (assessmentFile || existingAssessmentFileName) ? theme.text : "#94a3b8" }]}>
+                                    {assessmentFile
+                                        ? assessmentFile.name
+                                        : existingAssessmentFileName
+                                            ? `${existingAssessmentFileName} (tap to replace)`
+                                            : "Upload Assessment Form"}
                                 </Text>
                                 {assessmentFile && (
                                     <TouchableOpacity onPress={(e) => { e.stopPropagation(); setAssessmentFile(null); }}>

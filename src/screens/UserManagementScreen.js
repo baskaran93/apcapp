@@ -21,7 +21,7 @@ import { Ionicons as Icon } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 
 import { ThemeContext } from "../theme/ThemeContext";
-import { getUsers, registerUser, updateUser } from "../services/api";
+import { getUsers, registerUser, updateUser, getDesignations } from "../services/api";
 
 const ROLE_OPTIONS = ["admin", "doctor", "receptionist"];
 
@@ -36,11 +36,56 @@ function notify(title, message) {
   else Alert.alert(title, message);
 }
 
-function AddUserModal({ visible, onClose, onCreated, isDark, theme }) {
+function DesignationSelector({ designations, designationId, onChange, isDark, theme }) {
+  if (!designations.length) {
+    return (
+      <Text style={{ color: isDark ? "#64748b" : "#94a3b8", fontSize: 13, fontStyle: "italic" }}>
+        No designations yet. Add one from Settings {'>'} Designation Master.
+      </Text>
+    );
+  }
+  return (
+    <View style={styles.designationRow}>
+      <TouchableOpacity
+        onPress={() => onChange(null)}
+        style={[
+          styles.designationChip,
+          {
+            backgroundColor: !designationId ? theme.primary : (isDark ? "rgba(255,255,255,0.06)" : "rgba(15,23,42,0.05)"),
+            borderColor: !designationId ? theme.primary : (isDark ? "rgba(255,255,255,0.10)" : "#e5e7eb"),
+          },
+        ]}
+      >
+        <Text style={{ color: !designationId ? "#fff" : theme.text, fontWeight: "700" }}>None</Text>
+      </TouchableOpacity>
+      {designations.map((d) => {
+        const active = designationId === d.id;
+        return (
+          <TouchableOpacity
+            key={d.id}
+            onPress={() => onChange(d.id)}
+            style={[
+              styles.designationChip,
+              {
+                backgroundColor: active ? theme.primary : (isDark ? "rgba(255,255,255,0.06)" : "rgba(15,23,42,0.05)"),
+                borderColor: active ? theme.primary : (isDark ? "rgba(255,255,255,0.10)" : "#e5e7eb"),
+              },
+            ]}
+          >
+            <Text style={{ color: active ? "#fff" : theme.text, fontWeight: "700" }}>{d.designation_name}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+function AddUserModal({ visible, onClose, onCreated, isDark, theme, designations }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState("receptionist");
+  const [designationId, setDesignationId] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const reset = () => {
@@ -48,6 +93,7 @@ function AddUserModal({ visible, onClose, onCreated, isDark, theme }) {
     setPassword("");
     setShowPassword(false);
     setRole("receptionist");
+    setDesignationId(null);
   };
 
   const close = () => {
@@ -62,7 +108,7 @@ function AddUserModal({ visible, onClose, onCreated, isDark, theme }) {
     }
     try {
       setSaving(true);
-      const res = await registerUser(username.trim(), password, role);
+      const res = await registerUser(username.trim(), password, role, designationId);
       if (res.ok) {
         notify("Success", `User "${username.trim()}" created as ${role}.`);
         close();
@@ -143,6 +189,15 @@ function AddUserModal({ visible, onClose, onCreated, isDark, theme }) {
               })}
             </View>
 
+            <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569", marginTop: 14 }]}>Designation</Text>
+            <DesignationSelector
+              designations={designations}
+              designationId={designationId}
+              onChange={setDesignationId}
+              isDark={isDark}
+              theme={theme}
+            />
+
             <TouchableOpacity disabled={saving} onPress={handleCreate} activeOpacity={0.9} style={{ marginTop: 20 }}>
               <LinearGradient
                 colors={isDark ? ["#2563eb", "#06b6d4"] : ["#2563eb", "#7c3aed"]}
@@ -160,8 +215,9 @@ function AddUserModal({ visible, onClose, onCreated, isDark, theme }) {
   );
 }
 
-function EditUserModal({ visible, user, onClose, onSaved, isDark, theme }) {
+function EditUserModal({ visible, user, onClose, onSaved, isDark, theme, designations }) {
   const [role, setRole] = useState(user?.role || "receptionist");
+  const [designationId, setDesignationId] = useState(user?.designation_id || null);
   const [newPassword, setNewPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -169,6 +225,7 @@ function EditUserModal({ visible, user, onClose, onSaved, isDark, theme }) {
   // Keep local state in sync whenever a different user is opened for editing
   React.useEffect(() => {
     setRole(user?.role || "receptionist");
+    setDesignationId(user?.designation_id || null);
     setNewPassword("");
     setShowPassword(false);
   }, [user]);
@@ -185,6 +242,7 @@ function EditUserModal({ visible, user, onClose, onSaved, isDark, theme }) {
       setSaving(true);
       const res = await updateUser(user.id, {
         role,
+        designationId,
         newPassword: newPassword.trim() || undefined,
       });
       if (res.ok) {
@@ -251,6 +309,15 @@ function EditUserModal({ visible, user, onClose, onSaved, isDark, theme }) {
               })}
             </View>
 
+            <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569", marginTop: 14 }]}>Designation</Text>
+            <DesignationSelector
+              designations={designations}
+              designationId={designationId}
+              onChange={setDesignationId}
+              isDark={isDark}
+              theme={theme}
+            />
+
             <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569", marginTop: 14 }]}>
               Reset Password (optional)
             </Text>
@@ -291,6 +358,7 @@ const UserManagementScreen = () => {
   const isDark = mode === "dark";
 
   const [users, setUsers] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -307,19 +375,32 @@ const UserManagementScreen = () => {
     }
   }, []);
 
+  const loadDesignations = useCallback(async () => {
+    try {
+      const res = await getDesignations();
+      if (res.ok) setDesignations(res.data || []);
+    } catch (e) {
+      // ignore, keep previous list
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadUsers();
-    }, [loadUsers])
+      loadDesignations();
+    }, [loadUsers, loadDesignations])
   );
 
   const renderUser = ({ item }) => (
     <View style={[styles.userRow, { backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(15,23,42,0.04)" }]}>
       <View style={[styles.avatar, { backgroundColor: ROLE_COLORS[item.role] || theme.primary }]}>
-        <Text style={styles.avatarText}>{item.username.charAt(0).toUpperCase()}</Text>
+        <Text style={styles.avatarText}>{(item.username || "?").charAt(0).toUpperCase()}</Text>
       </View>
       <View style={{ flex: 1 }}>
         <Text style={[styles.username, { color: theme.text }]}>{item.username}</Text>
+        {item.designation_name && (
+          <Text style={[styles.designationText, { color: theme.subText }]}>{item.designation_name}</Text>
+        )}
       </View>
       <View style={[styles.roleBadge, { backgroundColor: (ROLE_COLORS[item.role] || theme.primary) + "20" }]}>
         <Text style={{ color: ROLE_COLORS[item.role] || theme.primary, fontWeight: "800", fontSize: 12, textTransform: "capitalize" }}>
@@ -367,6 +448,7 @@ const UserManagementScreen = () => {
         visible={modalVisible}
         isDark={isDark}
         theme={theme}
+        designations={designations}
         onClose={() => setModalVisible(false)}
         onCreated={loadUsers}
       />
@@ -376,6 +458,7 @@ const UserManagementScreen = () => {
         user={editingUser}
         isDark={isDark}
         theme={theme}
+        designations={designations}
         onClose={() => setEditingUser(null)}
         onSaved={loadUsers}
       />
@@ -423,6 +506,7 @@ const styles = StyleSheet.create({
   },
   avatarText: { color: "#fff", fontWeight: "800", fontSize: 16 },
   username: { fontSize: 15, fontWeight: "700" },
+  designationText: { fontSize: 12, fontWeight: "600", marginTop: 2 },
   roleBadge: {
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -470,6 +554,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 10,
     alignItems: "center",
+  },
+  designationRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  designationChip: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
   },
   saveBtn: {
     height: 52,

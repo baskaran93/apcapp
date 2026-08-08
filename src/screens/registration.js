@@ -13,14 +13,17 @@ import {
   Dimensions,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
+  Pressable,
 } from "react-native";
-import { createPatient, updatePatient } from "../services/api";
+import { createPatient, updatePatient, getReferralTypes } from "../services/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { Ionicons as Icon } from "@expo/vector-icons";
 import { ThemeContext } from "../theme/ThemeContext";
+import { scanRegistrationForm } from "../utils/scanForm";
 
 const { width } = Dimensions.get("window");
 
@@ -35,13 +38,18 @@ const Registration = () => {
 
   const [name, setName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [alternativeNumber, setAlternativeNumber] = useState("");
   const [age, setAge] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [pincode, setPincode] = useState("");
   const [modeOfReferral, setModeOfReferral] = useState("");
 
+  const [referralTypes, setReferralTypes] = useState([]);
+  const [showReferralPicker, setShowReferralPicker] = useState(false);
+
   const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [touched, setTouched] = useState({});
   const [errors, setErrors] = useState({});
 
@@ -53,10 +61,16 @@ const Registration = () => {
     [phoneNumber]
   );
 
+  const cleanedAltNumber = useMemo(
+    () => (alternativeNumber || "").replace(/\D/g, ""),
+    [alternativeNumber]
+  );
+
   useEffect(() => {
     if (mode === "edit" && patient) {
       setName(patient.name || "");
       setPhoneNumber(patient.phone_number || "");
+      setAlternativeNumber(patient.alternative_number || "");
       setAge(patient.age ? String(patient.age) : "");
       setAddress(patient.address || "");
       setCity(patient.city || "");
@@ -65,21 +79,57 @@ const Registration = () => {
     }
   }, [mode, patient]);
 
+  useEffect(() => {
+    const loadReferralTypes = async () => {
+      const res = await getReferralTypes();
+      if (res.ok && Array.isArray(res.data)) {
+        setReferralTypes(res.data);
+      }
+    };
+    loadReferralTypes();
+  }, []);
+
   const validate = () => {
     const e = {};
     if (!name.trim()) e.name = "Required";
     if (!cleanedPhone) e.phoneNumber = "Required";
     else if (cleanedPhone.length !== 10) e.phoneNumber = "10 digits";
+    if (cleanedAltNumber && cleanedAltNumber.length !== 10) e.alternativeNumber = "10 digits";
     if (!age.trim()) e.age = "Required";
     if (pincode && pincode.length !== 6) e.pincode = "6 digits";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
+  const handleScanForm = async () => {
+    try {
+      setScanning(true);
+      const fields = await scanRegistrationForm();
+      if (!fields) return; // user cancelled the camera
+
+      if (fields.name) setName(fields.name);
+      if (fields.phone_number) setPhoneNumber(fields.phone_number);
+      if (fields.age) setAge(fields.age);
+      if (fields.address) setAddress(fields.address);
+      if (fields.pincode) setPincode(fields.pincode);
+
+      if (Object.keys(fields).length === 0) {
+        Alert.alert("No text found", "Couldn't read the form. Please enter the details manually.");
+      } else {
+        Alert.alert("Scanned", "Fields filled from the form — please review them before saving, handwriting recognition isn't perfect.");
+      }
+    } catch (err) {
+      Alert.alert("Scan failed", err.message || "Unable to scan the form.");
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const handleSavePatient = async () => {
     setTouched({
       name: true,
       phoneNumber: true,
+      alternativeNumber: true,
       age: true,
       pincode: true,
     });
@@ -94,6 +144,7 @@ const Registration = () => {
       const payload = {
         name,
         phone_number: cleanedPhone,
+        alternative_number: cleanedAltNumber,
         age: Number(age),
         address,
         city,
@@ -188,6 +239,29 @@ const Registration = () => {
               },
             ]}
           >
+            {mode !== "edit" && (
+              <TouchableOpacity
+                disabled={scanning}
+                onPress={handleScanForm}
+                activeOpacity={0.85}
+                style={[
+                  styles.scanBtn,
+                  { borderColor: borderCol, backgroundColor: isDark ? "rgba(37,99,235,0.12)" : "rgba(37,99,235,0.08)" },
+                ]}
+              >
+                {scanning ? (
+                  <ActivityIndicator color={isDark ? "#3b82f6" : "#2563eb"} />
+                ) : (
+                  <>
+                    <Icon name="scan-outline" size={18} color={isDark ? "#3b82f6" : "#2563eb"} style={{ marginRight: 8 }} />
+                    <Text style={[styles.scanBtnText, { color: isDark ? "#3b82f6" : "#2563eb" }]}>
+                      Scan Paper Form
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+
             <View style={styles.grid}>
               <Field
                 icon="person-outline"
@@ -197,6 +271,11 @@ const Registration = () => {
                 icon="call-outline"
                 keyboardType="phone-pad"
                 {...f("Phone Number", phoneNumber, setPhoneNumber, errors.phoneNumber)}
+              />
+              <Field
+                icon="phone-portrait-outline"
+                keyboardType="phone-pad"
+                {...f("Alternative Number (Optional)", alternativeNumber, setAlternativeNumber, errors.alternativeNumber)}
               />
               <Field
                 icon="calendar-outline"
@@ -219,9 +298,16 @@ const Registration = () => {
                 keyboardType="numeric"
                 {...f("Pincode", pincode, setPincode, errors.pincode)}
               />
-              <Field
+              <SelectField
                 icon="share-social-outline"
-                {...f("Mode of Referral", modeOfReferral, setModeOfReferral)}
+                label="Mode of Referral"
+                value={modeOfReferral}
+                placeholder="Select referral type"
+                onPress={() => setShowReferralPicker(true)}
+                inputBg={inputBg}
+                borderCol={borderCol}
+                theme={theme}
+                isDark={isDark}
               />
             </View>
 
@@ -257,6 +343,56 @@ const Registration = () => {
         </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      <Modal
+        visible={showReferralPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowReferralPicker(false)}
+      >
+        <Pressable style={styles.pickerOverlay} onPress={() => setShowReferralPicker(false)}>
+          <Pressable
+            style={[styles.pickerSheet, { backgroundColor: isDark ? "#0f172a" : "#ffffff" }]}
+            onPress={() => {}}
+          >
+            <View style={styles.pickerHeader}>
+              <Text style={[styles.pickerTitle, { color: theme.text }]}>Mode of Referral</Text>
+              <TouchableOpacity onPress={() => setShowReferralPicker(false)}>
+                <Icon name="close" size={22} color={theme.subText} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {referralTypes.length === 0 ? (
+                <Text style={[styles.pickerEmptyText, { color: theme.subText }]}>
+                  No referral types configured yet. Add them from Settings → Referral Type Master.
+                </Text>
+              ) : (
+                referralTypes.map((rt) => {
+                  const selected = modeOfReferral === rt.referral_type_name;
+                  return (
+                    <TouchableOpacity
+                      key={rt.id}
+                      style={styles.pickerOptionRow}
+                      onPress={() => {
+                        setModeOfReferral(rt.referral_type_name);
+                        setShowReferralPicker(false);
+                      }}
+                    >
+                      <Text style={{ color: theme.text, fontWeight: selected ? "800" : "600" }}>
+                        {rt.referral_type_name}
+                      </Text>
+                      {selected && (
+                        <Icon name="checkmark" size={18} color={isDark ? "#3b82f6" : "#2563eb"} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 
@@ -355,6 +491,33 @@ function Field({
   );
 }
 
+function SelectField({ label, icon, value, placeholder, onPress, inputBg, borderCol, theme, isDark }) {
+  return (
+    <View style={styles.field}>
+      <Text style={[styles.fieldLabel, { color: isDark ? "#94a3b8" : "#64748b" }]}>{label}</Text>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={onPress}
+        style={[styles.inputWrap, { backgroundColor: inputBg, borderColor: borderCol }]}
+      >
+        <Icon
+          name={icon}
+          size={18}
+          color={isDark ? "#475569" : "#94a3b8"}
+          style={styles.fieldIcon}
+        />
+        <Text
+          numberOfLines={1}
+          style={[styles.input, { color: value ? theme.text : (isDark ? "#475569" : "#94a3b8") }]}
+        >
+          {value || placeholder}
+        </Text>
+        <Icon name="chevron-down-outline" size={16} color={isDark ? "#475569" : "#94a3b8"} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   scrollContainer: {
     padding: 20,
@@ -390,6 +553,20 @@ const styles = StyleSheet.create({
         boxShadow: "0px 20px 50px rgba(0,0,0,0.08)",
       },
     }),
+  },
+  scanBtn: {
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 20,
+  },
+  scanBtnText: {
+    fontWeight: "800",
+    fontSize: 14,
   },
   grid: {
     flexDirection: "row",
@@ -458,6 +635,43 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     marginTop: 25,
+  },
+
+  /* Mode of Referral picker */
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  pickerSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 32,
+  },
+  pickerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  pickerTitle: {
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  pickerOptionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(148,163,184,0.25)",
+  },
+  pickerEmptyText: {
+    fontSize: 13,
+    textAlign: "center",
+    paddingVertical: 24,
+    lineHeight: 18,
   },
 });
 

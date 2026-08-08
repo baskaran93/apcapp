@@ -31,6 +31,12 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow APC Clinic to use your camera to scan patient intake forms."
+        }
       ]
     ]
   }

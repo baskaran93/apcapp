@@ -16,11 +16,30 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Dimensions,
+  Keyboard,
 } from "react-native";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const MODAL_MAX_HEIGHT = SCREEN_HEIGHT * 0.85;
-const MODAL_SCROLL_HEIGHT = MODAL_MAX_HEIGHT - 90;
+
+// Tracks live keyboard height so modal ScrollViews can size themselves to
+// whatever space is actually left, instead of a fixed height that either
+// overflows off-screen when the keyboard is up or (if made flex-based)
+// collapses to zero when it isn't.
+function useKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvt, (e) => setHeight(e.endCoordinates?.height || 0));
+    const hideSub = Keyboard.addListener(hideEvt, () => setHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+  return height;
+}
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { Ionicons as Icon } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -95,6 +114,11 @@ export default function AppointmentScreen() {
   const canEdit = hasPermission(permissions, "appointments", "edit");
   const canDelete = hasPermission(permissions, "appointments", "delete");
   const isDark = mode === "dark";
+
+  const keyboardHeight = useKeyboardHeight();
+  const modalScrollMaxHeight = keyboardHeight > 0
+    ? Math.max(180, SCREEN_HEIGHT - keyboardHeight - 160)
+    : MODAL_MAX_HEIGHT - 90;
 
   const [selectedDate, setSelectedDate] = useState(toDateStr(new Date()));
   const [appointments, setAppointments] = useState([]);
@@ -480,7 +504,7 @@ export default function AppointmentScreen() {
             </View>
 
             <ScrollView
-              style={{ maxHeight: MODAL_SCROLL_HEIGHT }}
+              style={{ maxHeight: modalScrollMaxHeight }}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 160 }}
@@ -537,7 +561,7 @@ export default function AppointmentScreen() {
             </View>
 
             <ScrollView
-              style={{ maxHeight: MODAL_SCROLL_HEIGHT }}
+              style={{ maxHeight: modalScrollMaxHeight }}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 160 }}

@@ -4,7 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // const BASE_URL = "https://apc-doublemanda-backend-up.azurewebsites.net";
 // const BASE_URL = "http://localhost:8008"; // Local IIS API
 // const BASE_URL = "http://192.168.29.25:8008";
-const BASE_URL = "https://apc-clinic-backend-production.up.railway.app";
+const BASE_URL = "https://helpful-presence-production-4bdd.up.railway.app";
 // const BASE_URL = "http://10.0.2.2:8000";
 console.log("API BASE_URL:", BASE_URL);
 export const loginUser = async (username, password) => {
@@ -22,10 +22,7 @@ export const loginUser = async (username, password) => {
       }),
     });
 
-    console.log("Raw response:", response);
-
     const result = await response.json();
-    console.log("API result:", result);
 
     // If login returned an access_token, save it to AsyncStorage under the key `token`
     if (response.ok && result && result.access_token) {
@@ -83,7 +80,6 @@ export const getPatients = async (params = {}) => {
   try {
     // 🔑 Get token from storage
     const token = await AsyncStorage.getItem("token");
-    console.log("TOKEN 👉", token);
 
     // build query string if params provided
     let url = `${BASE_URL}/patient/list/`;
@@ -103,8 +99,6 @@ export const getPatients = async (params = {}) => {
       headers,
     });
 
-    console.log("Raw response 👉", response.status, response.type);
-
     let result = null;
     try {
       result = await response.json();
@@ -112,8 +106,6 @@ export const getPatients = async (params = {}) => {
       console.warn("Failed to parse JSON from patients response:", e);
       result = null;
     }
-
-    console.log("Patients API result 👉", result);
 
     return {
       ok: response.ok,
@@ -171,15 +163,13 @@ export const createPatient = async (formData) => {
     const payload = {
       name: formData.name || "",
       phone_number: formData.phone_number || formData.mobile || "",
+      alternative_number: formData.alternative_number || "",
       age: Number(formData.age) || 0,
       address: formData.address || "",
       city: formData.city || "",
       pincode: formData.pincode || "",
       mode_of_referral: formData.mode_of_referral || formData.referral || "",
     };
-
-    console.log("createPatient -> token:", token, "url:", `${BASE_URL}/patient/details/register/`);
-    console.log("Creating patient with payload:", payload);
 
     const response = await fetch(`${BASE_URL}/patient/details/register/`, {
       method: "POST",
@@ -206,8 +196,6 @@ export const createPatient = async (formData) => {
       };
     }
 
-    console.log("Create Patient Response:", dataToReturn);
-
     return {
       ok: response.ok,
       data: dataToReturn,
@@ -226,15 +214,13 @@ export const updatePatient = async (id, formData) => {
     const payload = {
       name: formData.name || "",
       phone_number: formData.phone_number || formData.mobile || "",
+      alternative_number: formData.alternative_number || "",
       age: formData.age !== undefined ? Number(formData.age) : undefined,
       address: formData.address || "",
       city: formData.city || "",
       pincode: formData.pincode || "",
       mode_of_referral: formData.mode_of_referral || formData.referral || "",
     };
-
-    console.log("updatePatient -> token:", token, "url:", `${BASE_URL}/patient/details/${id}/`);
-    console.log("Updating patient with payload:", payload);
 
     const response = await fetch(`${BASE_URL}/patient/details/${id}/`, {
       method: "PATCH",
@@ -257,8 +243,6 @@ export const updatePatient = async (id, formData) => {
       };
     }
 
-    console.log("Update Patient Response:", dataToReturn);
-
     return {
       ok: response.ok,
       data: dataToReturn,
@@ -272,7 +256,6 @@ export const updatePatient = async (id, formData) => {
 export const registerTreatment = async (payload) => {
   try {
     const token = await AsyncStorage.getItem("token");
-    console.log("Registering treatment with structured payload:", payload);
 
     const response = await fetch(`${BASE_URL}/patient/treatement/details/register/`, {
       method: "POST",
@@ -462,6 +445,81 @@ export const getDistinctPhysiotherapists = async () => {
     }
   };
 
+// ===== Designation master (admin) =====
+export const getDesignations = async () => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/designations/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get Designations Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const addDesignation = async (data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/designations/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Add Designation Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const updateDesignation = async (id, data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/designations/${id}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Update Designation Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const deleteDesignation = async (id) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/designations/${id}/`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Delete Designation Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
 // ===== Patient delete =====
 export const deletePatient = async (id) => {
   try {
@@ -632,7 +690,7 @@ export const getUsers = async () => {
   }
 };
 
-export const registerUser = async (username, password, role) => {
+export const registerUser = async (username, password, role, designationId) => {
   try {
     const token = await AsyncStorage.getItem("token");
     const response = await fetch(`${BASE_URL}/user/register/`, {
@@ -641,7 +699,7 @@ export const registerUser = async (username, password, role) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ username, password_hash: password, role }),
+      body: JSON.stringify({ username, password_hash: password, role, designation_id: designationId || null }),
     });
     const result = await response.json();
     return { ok: response.ok, data: result };
@@ -651,12 +709,88 @@ export const registerUser = async (username, password, role) => {
   }
 };
 
-export const updateUser = async (userId, { role, newPassword } = {}) => {
+// ===== Referral type master (admin) =====
+export const getReferralTypes = async () => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/referral_types/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get Referral Types Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const addReferralType = async (data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/referral_types/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Add Referral Type Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const updateReferralType = async (id, data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/referral_types/${id}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Update Referral Type Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const deleteReferralType = async (id) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/referral_types/${id}/`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Delete Referral Type Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const updateUser = async (userId, { role, newPassword, designationId } = {}) => {
   try {
     const token = await AsyncStorage.getItem("token");
     const payload = {};
     if (role !== undefined) payload.role = role;
     if (newPassword) payload.new_password = newPassword;
+    if (designationId !== undefined) payload.designation_id = designationId;
 
     const response = await fetch(`${BASE_URL}/user/${userId}/`, {
       method: "PUT",
@@ -670,6 +804,156 @@ export const updateUser = async (userId, { role, newPassword } = {}) => {
     return { ok: response.ok, data: result };
   } catch (error) {
     console.error("API Update User Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+// ===== Expense type master (admin) =====
+export const getExpenseTypes = async () => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/expense_types/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get Expense Types Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const addExpenseType = async (data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/expense_types/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Add Expense Type Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const updateExpenseType = async (id, data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/expense_types/${id}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Update Expense Type Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const deleteExpenseType = async (id) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/masters/expense_types/${id}/`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Delete Expense Type Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+// ===== Office expenses (admin) =====
+export const getOfficeExpenses = async () => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/office_expenses/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get Office Expenses Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const addOfficeExpense = async (data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/office_expenses/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Add Office Expense Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const updateOfficeExpense = async (id, data) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/office_expenses/${id}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Update Office Expense Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const deleteOfficeExpense = async (id) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/office_expenses/${id}/`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Delete Office Expense Error:", error);
     return { ok: false, data: null, error: String(error) };
   }
 };

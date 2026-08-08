@@ -29,7 +29,12 @@ import AppointmentScreen from "./src/screens/AppointmentScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
 import UserManagementScreen from "./src/screens/UserManagementScreen";
 import MenuRightsScreen from "./src/screens/MenuRightsScreen";
+import DesignationMaster from "./src/screens/DesignationMaster";
+import ReferralTypeMaster from "./src/screens/ReferralTypeMaster";
+import ExpenseMaster from "./src/screens/ExpenseMaster";
+import OfficeExpensesScreen from "./src/screens/OfficeExpensesScreen";
 import TreatmentHistoryScreen from "./src/screens/TreatmentHistoryScreen";
+import BillingScreen from "./src/screens/BillingScreen";
 
 const MENU_BY_ROUTE = {
   Patients: "patients",
@@ -37,6 +42,7 @@ const MENU_BY_ROUTE = {
   "Treatment Charges": "treatment_charges",
   "Patient Treatment": "patient_treatment",
   "Treatment History": "patient_treatment",
+  "Billing": "patient_treatment",
 };
 
 const Drawer = createDrawerNavigator();
@@ -106,7 +112,7 @@ function CustomDrawerContent(props) {
 
             // Settings and admin-only management screens are reached via
             // Settings, not the sidebar menu
-            if (["Settings", "Manage Users", "Menu Rights"].includes(route.name)) return null;
+            if (["Settings", "Manage Users", "Menu Rights", "Designation Master", "Referral Type Master", "Expense Master", "Office Expenses"].includes(route.name)) return null;
 
             // Menu-scoped visibility: driven by the configurable role_permissions
             // table (admin's /permissions/me/ is all-true, so admin always sees everything)
@@ -122,6 +128,7 @@ function CustomDrawerContent(props) {
               "Treatment Charges": "cash-multiple",
               "Patient Treatment": "medical-bag",
               "Treatment History": "history",
+              "Billing": "receipt-text-outline",
             };
 
             const iconName = iconMap[route.name] || "circle-outline";
@@ -297,6 +304,10 @@ function DrawerNavigator() {
         name="Treatment History"
         component={withPermissionGuard(TreatmentHistoryScreen, "patient_treatment")}
       />
+      <Drawer.Screen
+        name="Billing"
+        component={withPermissionGuard(BillingScreen, "patient_treatment")}
+      />
       <Drawer.Screen name="Settings" component={SettingsScreen} />
       <Drawer.Screen
         name="Manage Users"
@@ -305,6 +316,22 @@ function DrawerNavigator() {
       <Drawer.Screen
         name="Menu Rights"
         component={withRoleGuard(MenuRightsScreen, ["admin"])}
+      />
+      <Drawer.Screen
+        name="Designation Master"
+        component={withRoleGuard(DesignationMaster, ["admin"])}
+      />
+      <Drawer.Screen
+        name="Referral Type Master"
+        component={withRoleGuard(ReferralTypeMaster, ["admin"])}
+      />
+      <Drawer.Screen
+        name="Expense Master"
+        component={withRoleGuard(ExpenseMaster, ["admin"])}
+      />
+      <Drawer.Screen
+        name="Office Expenses"
+        component={withRoleGuard(OfficeExpensesScreen, ["admin"])}
       />
     </Drawer.Navigator>
   );
