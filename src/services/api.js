@@ -4,8 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // const BASE_URL = "https://apc-doublemanda-backend-up.azurewebsites.net";
 // const BASE_URL = "http://localhost:8008"; // Local IIS API
 // const BASE_URL = "http://192.168.29.25:8008";
-const BASE_URL = "https://helpful-presence-production-4bdd.up.railway.app";
-// const BASE_URL = "http://10.0.2.2:8000";
+// const BASE_URL = "https://helpful-presence-production-4bdd.up.railway.app";
+const BASE_URL = "https://apcclinic.onrender.com";
 console.log("API BASE_URL:", BASE_URL);
 export const loginUser = async (username, password) => {
   try {
@@ -327,10 +327,10 @@ export const getDistinctDiagnoses = async () => {
   }
 };
 
-export const getDashboardSummary = async () => {
+export const getDashboardSummary = async (period = "month") => {
   try {
     const token = await AsyncStorage.getItem("token");
-    const response = await fetch(`${BASE_URL}/dashboard/summary/`, {
+    const response = await fetch(`${BASE_URL}/dashboard/summary/?period=${period}`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -423,6 +423,69 @@ export const cancelAppointment = async (id) => {
     return { ok: response.ok, data: result };
   } catch (error) {
     console.error("API Cancel Appointment Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const registerEnquiry = async (payload) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/enquiry/register/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Register Enquiry Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const getEnquiries = async (params = {}) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+
+    let url = `${BASE_URL}/enquiry/list/`;
+    const qs = Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join("&");
+    if (qs) url += `?${qs}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get Enquiries Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
+export const convertEnquiryToPatient = async (enquiryId) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/enquiry/convert/${enquiryId}/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Convert Enquiry Error:", error);
     return { ok: false, data: null, error: String(error) };
   }
 };

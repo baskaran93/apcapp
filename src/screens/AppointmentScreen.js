@@ -8,9 +8,9 @@ import {
   TextInput,
   FlatList,
   Modal,
+  Pressable,
   ActivityIndicator,
   Alert,
-  SafeAreaView,
   StatusBar,
   Platform,
   KeyboardAvoidingView,
@@ -18,6 +18,8 @@ import {
   Dimensions,
   Keyboard,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import DateTimePicker from "@react-native-community/datetimepicker";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const MODAL_MAX_HEIGHT = SCREEN_HEIGHT * 0.85;
@@ -52,6 +54,10 @@ import {
   getAppointments,
   updateAppointment,
   cancelAppointment,
+  getUsers,
+  registerEnquiry,
+  getEnquiries,
+  convertEnquiryToPatient,
 } from "../services/api";
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -113,6 +119,7 @@ export default function AppointmentScreen() {
   const canAdd = hasPermission(permissions, "appointments", "add");
   const canEdit = hasPermission(permissions, "appointments", "edit");
   const canDelete = hasPermission(permissions, "appointments", "delete");
+  const canAddPatients = hasPermission(permissions, "patients", "add");
   const isDark = mode === "dark";
 
   const keyboardHeight = useKeyboardHeight();
@@ -130,14 +137,24 @@ export default function AppointmentScreen() {
   const [activeAppt, setActiveAppt] = useState(null);
 
   // Booking form state
+  const [bookMode, setBookMode] = useState("patient"); // "patient" | "enquiry"
   const [patients, setPatients] = useState([]);
   const [patientSearch, setPatientSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState(null);
+  const [enquiries, setEnquiries] = useState([]);
+  const [enquirySearch, setEnquirySearch] = useState("");
+  const [selectedEnquiry, setSelectedEnquiry] = useState(null);
+  const [newEnquiryName, setNewEnquiryName] = useState("");
+  const [newEnquiryPhone, setNewEnquiryPhone] = useState("");
+  const [newEnquiryAlt, setNewEnquiryAlt] = useState("");
+  const [newEnquiryReason, setNewEnquiryReason] = useState("");
+  const [creatingEnquiry, setCreatingEnquiry] = useState(false);
   const [formDate, setFormDate] = useState(toDateStr(new Date()));
   const [formTime, setFormTime] = useState("");
   const [doctorName, setDoctorName] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [doctorUsers, setDoctorUsers] = useState([]);
 
   const loadAppointments = useCallback(async (date) => {
     try {
@@ -168,10 +185,36 @@ export default function AppointmentScreen() {
     }
   }, []);
 
+  const loadEnquiries = useCallback(async () => {
+    try {
+      const res = await getEnquiries({ status: "Open" });
+      if (res.ok) {
+        setEnquiries(res.data?.data || []);
+      }
+    } catch (e) {
+      console.error("LOAD ENQUIRIES ERROR", e);
+    }
+  }, []);
+
+  // Physiotherapists selectable for an appointment are Manage Users accounts
+  // whose designation is "Doctor" (designation is the job title, separate
+  // from the login role used for app access).
+  const loadDoctorUsers = useCallback(async () => {
+    try {
+      const res = await getUsers();
+      if (res.ok) {
+        const users = res.data?.data || [];
+        setDoctorUsers(users.filter((u) => (u.designation_name || "").toLowerCase().includes("doctor")));
+      }
+    } catch (e) {
+      console.error("LOAD DOCTOR USERS ERROR", e);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([loadAppointments(selectedDate), loadPatients()]);
+      await Promise.all([loadAppointments(selectedDate), loadPatients(), loadEnquiries(), loadDoctorUsers()]);
       setLoading(false);
     })();
   }, []);
@@ -183,7 +226,8 @@ export default function AppointmentScreen() {
   useFocusEffect(
     useCallback(() => {
       loadAppointments(selectedDate);
-    }, [selectedDate, loadAppointments])
+      loadEnquiries();
+    }, [selectedDate, loadAppointments, loadEnquiries])
   );
 
   const onRefresh = async () => {
@@ -205,9 +249,29 @@ export default function AppointmentScreen() {
       .slice(0, 6);
   }, [patientSearch, patients]);
 
+  const filteredEnquiries = useMemo(() => {
+    if (!enquirySearch.trim()) return [];
+    const q = enquirySearch.toLowerCase();
+    return enquiries
+      .filter(
+        (e) =>
+          (e.name || "").toLowerCase().includes(q) ||
+          (e.phone_number || "").includes(q) ||
+          String(e.id || "").toLowerCase().includes(q)
+      )
+      .slice(0, 6);
+  }, [enquirySearch, enquiries]);
+
   const resetBookForm = () => {
+    setBookMode("patient");
     setSelectedPatient(null);
     setPatientSearch("");
+    setSelectedEnquiry(null);
+    setEnquirySearch("");
+    setNewEnquiryName("");
+    setNewEnquiryPhone("");
+    setNewEnquiryAlt("");
+    setNewEnquiryReason("");
     setFormDate(toDateStr(new Date()));
     setFormTime("");
     setDoctorName("");
@@ -220,9 +284,46 @@ export default function AppointmentScreen() {
     setShowBookModal(true);
   };
 
+  const handleCreateEnquiry = async () => {
+    if (!newEnquiryName.trim() || !newEnquiryPhone.trim()) {
+      Alert.alert("Validation", "Please enter the enquirer's name and phone number.");
+      return;
+    }
+    try {
+      setCreatingEnquiry(true);
+      const res = await registerEnquiry({
+        name: newEnquiryName.trim(),
+        phone_number: newEnquiryPhone.trim(),
+        alternative_number: newEnquiryAlt.trim() || undefined,
+        reason: newEnquiryReason.trim() || undefined,
+      });
+      if (res.ok && res.data?.data) {
+        const created = res.data.data;
+        setEnquiries((prev) => [created, ...prev]);
+        setSelectedEnquiry(created);
+        setNewEnquiryName("");
+        setNewEnquiryPhone("");
+        setNewEnquiryAlt("");
+        setNewEnquiryReason("");
+      } else {
+        const msg = res.data?.detail || res.data?.message || "Failed to save enquiry.";
+        Alert.alert("Error", typeof msg === "string" ? msg : JSON.stringify(msg));
+      }
+    } catch (e) {
+      console.error("CREATE ENQUIRY ERROR", e);
+      Alert.alert("Error", "An unexpected error occurred while saving the enquiry.");
+    } finally {
+      setCreatingEnquiry(false);
+    }
+  };
+
   const handleBook = async () => {
-    if (!selectedPatient) {
+    if (bookMode === "patient" && !selectedPatient) {
       Alert.alert("Validation", "Please select a patient.");
+      return;
+    }
+    if (bookMode === "enquiry" && !selectedEnquiry) {
+      Alert.alert("Validation", "Please select or add an enquiry.");
       return;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(formDate)) {
@@ -239,7 +340,8 @@ export default function AppointmentScreen() {
       setSubmitting(true);
       const appointment_date = `${formDate}T${time24}:00`;
       const res = await bookAppointment({
-        patient_id: selectedPatient.id,
+        patient_id: bookMode === "patient" ? selectedPatient.id : undefined,
+        enquiry_id: bookMode === "enquiry" ? selectedEnquiry.id : undefined,
         appointment_date,
         doctor_name: doctorName.trim() || undefined,
         notes: notes.trim() || undefined,
@@ -260,6 +362,36 @@ export default function AppointmentScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleConvertEnquiry = (appt) => {
+    Alert.alert(
+      "Convert to Patient",
+      `Register ${appt.patient_name || "this enquiry"} as a full patient? A new patient ID will be created and this appointment will be linked to it.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Convert",
+          onPress: async () => {
+            try {
+              const res = await convertEnquiryToPatient(appt.enquiry_id);
+              if (res.ok) {
+                Alert.alert("Success", `Converted to patient ${res.data?.data?.patient_id || ""}.`);
+                loadAppointments(selectedDate);
+                loadPatients();
+                loadEnquiries();
+              } else {
+                const msg = res.data?.detail || res.data?.message || "Failed to convert enquiry.";
+                Alert.alert("Error", typeof msg === "string" ? msg : JSON.stringify(msg));
+              }
+            } catch (e) {
+              console.error("CONVERT ENQUIRY ERROR", e);
+              Alert.alert("Error", "An unexpected error occurred while converting.");
+            }
+          },
+        },
+      ]
+    );
   };
 
   const openFixModal = (appt) => {
@@ -357,8 +489,15 @@ export default function AppointmentScreen() {
             <Icon name="time-outline" size={16} color={theme.primary} />
             <Text style={[styles.apptTime, { color: theme.text }]}>{toTimeStr12(d)}</Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: statusColor + "22" }]}>
-            <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            {item.is_enquiry && (
+              <View style={[styles.statusBadge, { backgroundColor: "#a855f722" }]}>
+                <Text style={[styles.statusText, { color: "#a855f7" }]}>Enquiry</Text>
+              </View>
+            )}
+            <View style={[styles.statusBadge, { backgroundColor: statusColor + "22" }]}>
+              <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+            </View>
           </View>
         </View>
 
@@ -374,9 +513,19 @@ export default function AppointmentScreen() {
           </Text>
         )}
 
-        {item.status === "Scheduled" && (canEdit || canDelete) && (
+        {(item.status === "Scheduled" && (canEdit || canDelete)) || (item.is_enquiry && canAddPatients) ? (
           <View style={styles.apptActions}>
-            {canEdit && (
+            {item.is_enquiry && canAddPatients && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: "#a855f718" }]}
+                onPress={() => handleConvertEnquiry(item)}
+              >
+                <Icon name="person-add-outline" size={16} color="#a855f7" />
+                <Text style={[styles.actionBtnText, { color: "#a855f7" }]}>Convert to Patient</Text>
+              </TouchableOpacity>
+            )}
+
+            {item.status === "Scheduled" && canEdit && (
               <TouchableOpacity
                 style={[styles.actionBtn, { backgroundColor: theme.primary + "18" }]}
                 onPress={() => openFixModal(item)}
@@ -386,7 +535,7 @@ export default function AppointmentScreen() {
               </TouchableOpacity>
             )}
 
-            {canEdit && (
+            {item.status === "Scheduled" && canEdit && (
               <TouchableOpacity
                 style={[styles.actionBtn, { backgroundColor: "#22c55e18" }]}
                 onPress={() => handleStatusChange(item, "Completed")}
@@ -396,7 +545,7 @@ export default function AppointmentScreen() {
               </TouchableOpacity>
             )}
 
-            {canDelete && (
+            {item.status === "Scheduled" && canDelete && (
               <TouchableOpacity
                 style={[styles.actionBtn, { backgroundColor: "#ef444418" }]}
                 onPress={() => handleCancel(item)}
@@ -406,7 +555,7 @@ export default function AppointmentScreen() {
               </TouchableOpacity>
             )}
           </View>
-        )}
+        ) : null}
       </View>
     );
   };
@@ -512,17 +661,35 @@ export default function AppointmentScreen() {
               <BookForm
                 theme={theme}
                 isDark={isDark}
+                bookMode={bookMode}
+                setBookMode={setBookMode}
                 selectedPatient={selectedPatient}
                 setSelectedPatient={setSelectedPatient}
                 patientSearch={patientSearch}
                 setPatientSearch={setPatientSearch}
                 filteredPatients={filteredPatients}
+                selectedEnquiry={selectedEnquiry}
+                setSelectedEnquiry={setSelectedEnquiry}
+                enquirySearch={enquirySearch}
+                setEnquirySearch={setEnquirySearch}
+                filteredEnquiries={filteredEnquiries}
+                newEnquiryName={newEnquiryName}
+                setNewEnquiryName={setNewEnquiryName}
+                newEnquiryPhone={newEnquiryPhone}
+                setNewEnquiryPhone={setNewEnquiryPhone}
+                newEnquiryAlt={newEnquiryAlt}
+                setNewEnquiryAlt={setNewEnquiryAlt}
+                newEnquiryReason={newEnquiryReason}
+                setNewEnquiryReason={setNewEnquiryReason}
+                creatingEnquiry={creatingEnquiry}
+                onCreateEnquiry={handleCreateEnquiry}
                 formDate={formDate}
                 setFormDate={setFormDate}
                 formTime={formTime}
                 setFormTime={setFormTime}
                 doctorName={doctorName}
                 setDoctorName={setDoctorName}
+                doctorUsers={doctorUsers}
                 notes={notes}
                 setNotes={setNotes}
               />
@@ -575,8 +742,7 @@ export default function AppointmentScreen() {
                 setFormTime={setFormTime}
               />
 
-              <FieldLabel theme={theme} label="Doctor / Physiotherapist" />
-              <TextField theme={theme} isDark={isDark} value={doctorName} onChangeText={setDoctorName} placeholder="Doctor name" />
+              <DoctorField theme={theme} isDark={isDark} value={doctorName} onChange={setDoctorName} doctorUsers={doctorUsers} />
 
               <FieldLabel theme={theme} label="Notes" />
               <TextField theme={theme} isDark={isDark} value={notes} onChangeText={setNotes} placeholder="Notes" />
@@ -622,10 +788,61 @@ function TextField({ theme, isDark, ...props }) {
 }
 
 function DateTimeFields({ theme, isDark, formDate, setFormDate, formTime, setFormTime }) {
+  // Midnight today, so the date picker's minimumDate excludes past dates
+  // but still allows picking today.
+  const todayMidnight = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  const dateValue = formDate && /^\d{4}-\d{2}-\d{2}$/.test(formDate)
+    ? new Date(`${formDate}T00:00:00`)
+    : todayMidnight;
+
+  const timeValue = (() => {
+    const time24 = to24Hour(formTime);
+    const d = new Date();
+    if (time24) {
+      const [h, m] = time24.split(":").map(Number);
+      d.setHours(h, m, 0, 0);
+    } else {
+      d.setHours(10, 0, 0, 0);
+    }
+    return d;
+  })();
+
   return (
     <>
-      <FieldLabel theme={theme} label="Date (YYYY-MM-DD)" />
-      <TextField theme={theme} isDark={isDark} value={formDate} onChangeText={setFormDate} placeholder="2026-07-23" />
+      <FieldLabel theme={theme} label="Date" />
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => setShowDatePicker(true)}
+        style={[styles.inputWrap, styles.pickerTrigger, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}
+      >
+        <Text style={[styles.textInput, { color: formDate ? theme.text : "#94a3b8" }]}>
+          {formDate || "Select date"}
+        </Text>
+        <Icon name="calendar-outline" size={18} color="#94a3b8" />
+      </TouchableOpacity>
+      {showDatePicker && (
+        <DateTimePicker
+          value={dateValue}
+          mode="date"
+          display={Platform.OS === "ios" ? "spinner" : "default"}
+          minimumDate={todayMidnight}
+          onChange={(event, date) => {
+            setShowDatePicker(Platform.OS === "ios");
+            if (event.type !== "dismissed" && date) {
+              setFormDate(toDateStr(date));
+            }
+            if (Platform.OS !== "ios") setShowDatePicker(false);
+          }}
+        />
+      )}
       <View style={styles.chipRowSmall}>
         {DATE_CHIPS.map((c) => {
           const d = new Date();
@@ -643,8 +860,32 @@ function DateTimeFields({ theme, isDark, formDate, setFormDate, formTime, setFor
         })}
       </View>
 
-      <FieldLabel theme={theme} label="Time (hh:mm AM/PM)" />
-      <TextField theme={theme} isDark={isDark} value={formTime} onChangeText={setFormTime} placeholder="10:00 AM" />
+      <FieldLabel theme={theme} label="Time" />
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => setShowTimePicker(true)}
+        style={[styles.inputWrap, styles.pickerTrigger, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}
+      >
+        <Text style={[styles.textInput, { color: formTime ? theme.text : "#94a3b8" }]}>
+          {formTime || "Select time"}
+        </Text>
+        <Icon name="time-outline" size={18} color="#94a3b8" />
+      </TouchableOpacity>
+      {showTimePicker && (
+        <DateTimePicker
+          value={timeValue}
+          mode="time"
+          is24Hour={false}
+          display={Platform.OS === "ios" ? "spinner" : "default"}
+          onChange={(event, date) => {
+            setShowTimePicker(Platform.OS === "ios");
+            if (event.type !== "dismissed" && date) {
+              setFormTime(toTimeStr12(date));
+            }
+            if (Platform.OS !== "ios") setShowTimePicker(false);
+          }}
+        />
+      )}
       <View style={styles.chipRowSmall}>
         {TIME_CHIPS.map((t) => (
           <TouchableOpacity
@@ -660,63 +901,275 @@ function DateTimeFields({ theme, isDark, formDate, setFormDate, formTime, setFor
   );
 }
 
+// Physiotherapist picker — mirrors the Mode of Referral / Expense Type
+// bottom-sheet picker pattern used elsewhere in the app.
+function DoctorField({ theme, isDark, value, onChange, doctorUsers }) {
+  const [showPicker, setShowPicker] = useState(false);
+  return (
+    <>
+      <FieldLabel theme={theme} label="Doctor / Physiotherapist" />
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => setShowPicker(true)}
+        style={[styles.inputWrap, styles.pickerTrigger, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}
+      >
+        <Text style={[styles.textInput, { color: value ? theme.text : "#94a3b8" }]} numberOfLines={1}>
+          {value || "Select doctor"}
+        </Text>
+        <Icon name="chevron-down-outline" size={16} color="#94a3b8" />
+      </TouchableOpacity>
+
+      <Modal visible={showPicker} transparent animationType="slide" onRequestClose={() => setShowPicker(false)}>
+        <Pressable style={styles.pickerOverlay} onPress={() => setShowPicker(false)}>
+          <Pressable style={[styles.pickerSheet, { backgroundColor: isDark ? "#0f172a" : "#ffffff" }]} onPress={() => {}}>
+            <View style={styles.pickerHeader}>
+              <Text style={[styles.pickerTitle, { color: theme.text }]}>Doctor / Physiotherapist</Text>
+              <TouchableOpacity onPress={() => setShowPicker(false)}>
+                <Icon name="close" size={22} color={theme.subText} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {doctorUsers.length === 0 ? (
+                <Text style={[styles.pickerEmptyText, { color: theme.subText }]}>
+                  No users with the "Doctor" designation yet. Add one from Settings → Manage Users.
+                </Text>
+              ) : (
+                doctorUsers.map((u) => {
+                  const selected = value === u.username;
+                  return (
+                    <TouchableOpacity
+                      key={u.id}
+                      style={styles.pickerOptionRow}
+                      onPress={() => {
+                        onChange(u.username);
+                        setShowPicker(false);
+                      }}
+                    >
+                      <Text style={{ color: theme.text, fontWeight: selected ? "800" : "600" }}>{u.username}</Text>
+                      {selected && <Icon name="checkmark" size={18} color={isDark ? "#3b82f6" : "#2563eb"} />}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
+
 function BookForm({
   theme,
   isDark,
+  bookMode,
+  setBookMode,
   selectedPatient,
   setSelectedPatient,
   patientSearch,
   setPatientSearch,
   filteredPatients,
+  selectedEnquiry,
+  setSelectedEnquiry,
+  enquirySearch,
+  setEnquirySearch,
+  filteredEnquiries,
+  newEnquiryName,
+  setNewEnquiryName,
+  newEnquiryPhone,
+  setNewEnquiryPhone,
+  newEnquiryAlt,
+  setNewEnquiryAlt,
+  newEnquiryReason,
+  setNewEnquiryReason,
+  creatingEnquiry,
+  onCreateEnquiry,
   formDate,
   setFormDate,
   formTime,
   setFormTime,
   doctorName,
   setDoctorName,
+  doctorUsers,
   notes,
   setNotes,
 }) {
   return (
     <View>
-      <FieldLabel theme={theme} label="Patient" />
-      {selectedPatient ? (
-        <View style={[styles.selectedPatientRow, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.text, fontWeight: "700" }}>{selectedPatient.name}</Text>
-            <Text style={{ color: theme.subText, fontSize: 12 }}>
-              {selectedPatient.id} • {selectedPatient.phone_number}
-            </Text>
-          </View>
-          <TouchableOpacity onPress={() => setSelectedPatient(null)}>
-            <Text style={{ color: "#ef4444", fontWeight: "700" }}>Change</Text>
-          </TouchableOpacity>
-        </View>
+      <FieldLabel theme={theme} label="Booking For" />
+      <View style={styles.modeToggleRow}>
+        <TouchableOpacity
+          style={[
+            styles.modeToggleBtn,
+            {
+              backgroundColor: bookMode === "patient" ? theme.primary : "transparent",
+              borderColor: bookMode === "patient" ? theme.primary : isDark ? "rgba(255,255,255,0.15)" : "#e5e7eb",
+            },
+          ]}
+          onPress={() => setBookMode("patient")}
+        >
+          <Icon name="person-outline" size={15} color={bookMode === "patient" ? "#fff" : theme.subText} />
+          <Text style={{ color: bookMode === "patient" ? "#fff" : theme.text, fontWeight: "700", fontSize: 13 }}>
+            Existing Patient
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.modeToggleBtn,
+            {
+              backgroundColor: bookMode === "enquiry" ? theme.primary : "transparent",
+              borderColor: bookMode === "enquiry" ? theme.primary : isDark ? "rgba(255,255,255,0.15)" : "#e5e7eb",
+            },
+          ]}
+          onPress={() => setBookMode("enquiry")}
+        >
+          <Icon name="help-circle-outline" size={15} color={bookMode === "enquiry" ? "#fff" : theme.subText} />
+          <Text style={{ color: bookMode === "enquiry" ? "#fff" : theme.text, fontWeight: "700", fontSize: 13 }}>
+            New Enquiry
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {bookMode === "patient" ? (
+        <>
+          <FieldLabel theme={theme} label="Patient" />
+          {selectedPatient ? (
+            <View style={[styles.selectedPatientRow, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.text, fontWeight: "700" }}>{selectedPatient.name}</Text>
+                <Text style={{ color: theme.subText, fontSize: 12 }}>
+                  {selectedPatient.id} • {selectedPatient.phone_number}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setSelectedPatient(null)}>
+                <Text style={{ color: "#ef4444", fontWeight: "700" }}>Change</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <TextField
+                theme={theme}
+                isDark={isDark}
+                value={patientSearch}
+                onChangeText={setPatientSearch}
+                placeholder="Search patient by name / phone / ID"
+              />
+              {filteredPatients.length > 0 && (
+                <View style={styles.searchResults}>
+                  {filteredPatients.map((p) => (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={styles.searchResultItem}
+                      onPress={() => {
+                        setSelectedPatient(p);
+                        setPatientSearch("");
+                      }}
+                    >
+                      <Text style={{ color: theme.text, fontWeight: "600" }}>{p.name}</Text>
+                      <Text style={{ color: theme.subText, fontSize: 12 }}>{p.id} • {p.phone_number}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+        </>
       ) : (
         <>
-          <TextField
-            theme={theme}
-            isDark={isDark}
-            value={patientSearch}
-            onChangeText={setPatientSearch}
-            placeholder="Search patient by name / phone / ID"
-          />
-          {filteredPatients.length > 0 && (
-            <View style={styles.searchResults}>
-              {filteredPatients.map((p) => (
-                <TouchableOpacity
-                  key={p.id}
-                  style={styles.searchResultItem}
-                  onPress={() => {
-                    setSelectedPatient(p);
-                    setPatientSearch("");
-                  }}
-                >
-                  <Text style={{ color: theme.text, fontWeight: "600" }}>{p.name}</Text>
-                  <Text style={{ color: theme.subText, fontSize: 12 }}>{p.phone_number}</Text>
-                </TouchableOpacity>
-              ))}
+          <FieldLabel theme={theme} label="Enquiry" />
+          {selectedEnquiry ? (
+            <View style={[styles.selectedPatientRow, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.text, fontWeight: "700" }}>{selectedEnquiry.name}</Text>
+                <Text style={{ color: theme.subText, fontSize: 12 }}>
+                  {selectedEnquiry.id} • {selectedEnquiry.phone_number}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setSelectedEnquiry(null)}>
+                <Text style={{ color: "#ef4444", fontWeight: "700" }}>Change</Text>
+              </TouchableOpacity>
             </View>
+          ) : (
+            <>
+              <TextField
+                theme={theme}
+                isDark={isDark}
+                value={enquirySearch}
+                onChangeText={setEnquirySearch}
+                placeholder="Search open enquiries by name / phone / ID"
+              />
+              {filteredEnquiries.length > 0 && (
+                <View style={styles.searchResults}>
+                  {filteredEnquiries.map((e) => (
+                    <TouchableOpacity
+                      key={e.id}
+                      style={styles.searchResultItem}
+                      onPress={() => {
+                        setSelectedEnquiry(e);
+                        setEnquirySearch("");
+                      }}
+                    >
+                      <Text style={{ color: theme.text, fontWeight: "600" }}>{e.name}</Text>
+                      <Text style={{ color: theme.subText, fontSize: 12 }}>{e.id} • {e.phone_number}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              <View style={[styles.newEnquiryBox, { borderColor: isDark ? "rgba(255,255,255,0.1)" : "#e5e7eb" }]}>
+                <Text style={{ color: theme.subText, fontSize: 12, fontWeight: "700", marginBottom: 8 }}>
+                  Or add a new enquiry
+                </Text>
+                <TextField
+                  theme={theme}
+                  isDark={isDark}
+                  value={newEnquiryName}
+                  onChangeText={setNewEnquiryName}
+                  placeholder="Name *"
+                />
+                <View style={{ height: 10 }} />
+                <TextField
+                  theme={theme}
+                  isDark={isDark}
+                  value={newEnquiryPhone}
+                  onChangeText={setNewEnquiryPhone}
+                  placeholder="Phone number *"
+                  keyboardType="phone-pad"
+                />
+                <View style={{ height: 10 }} />
+                <TextField
+                  theme={theme}
+                  isDark={isDark}
+                  value={newEnquiryAlt}
+                  onChangeText={setNewEnquiryAlt}
+                  placeholder="Alternative number (optional)"
+                  keyboardType="phone-pad"
+                />
+                <View style={{ height: 10 }} />
+                <TextField
+                  theme={theme}
+                  isDark={isDark}
+                  value={newEnquiryReason}
+                  onChangeText={setNewEnquiryReason}
+                  placeholder="Reason for enquiry (optional)"
+                />
+                <TouchableOpacity
+                  style={[styles.addEnquiryBtn, { backgroundColor: theme.primary, opacity: creatingEnquiry ? 0.7 : 1 }]}
+                  onPress={onCreateEnquiry}
+                  disabled={creatingEnquiry}
+                >
+                  {creatingEnquiry ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Icon name="add-circle-outline" size={16} color="#fff" />
+                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Add Enquiry</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </>
           )}
         </>
       )}
@@ -730,8 +1183,7 @@ function BookForm({
         setFormTime={setFormTime}
       />
 
-      <FieldLabel theme={theme} label="Doctor / Physiotherapist" />
-      <TextField theme={theme} isDark={isDark} value={doctorName} onChangeText={setDoctorName} placeholder="Doctor name" />
+      <DoctorField theme={theme} isDark={isDark} value={doctorName} onChange={setDoctorName} doctorUsers={doctorUsers} />
 
       <FieldLabel theme={theme} label="Notes" />
       <TextField theme={theme} isDark={isDark} value={notes} onChangeText={setNotes} placeholder="Notes" />
@@ -891,6 +1343,43 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     ...Platform.select({ web: { outlineStyle: "none" } }),
   },
+  pickerTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  pickerSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 32,
+  },
+  pickerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  pickerTitle: { fontSize: 17, fontWeight: "900" },
+  pickerOptionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(148,163,184,0.25)",
+  },
+  pickerEmptyText: {
+    fontSize: 13,
+    textAlign: "center",
+    paddingVertical: 24,
+    lineHeight: 18,
+  },
   chipRowSmall: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -908,6 +1397,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 12,
     borderRadius: 14,
+  },
+  modeToggleRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  modeToggleBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  newEnquiryBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: "dashed",
+  },
+  addEnquiryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 42,
+    borderRadius: 12,
+    marginTop: 12,
   },
   searchResults: {
     marginTop: 8,
