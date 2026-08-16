@@ -9,13 +9,19 @@ import {
   useWindowDimensions,
   Animated,
   Platform,
+  Modal,
+  Pressable,
 } from "react-native";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { Ionicons as Icon } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { ThemeContext } from "../theme/ThemeContext";
 import { AuthContext } from "../context/AuthContext";
 import { LinearGradient } from "expo-linear-gradient";
 import { getDashboardSummary, getAppointments } from "../services/api";
+
+const pad = (n) => String(n).padStart(2, "0");
+const toDateStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 const STATUS_COLORS = {
   Scheduled: "#3b82f6",
@@ -39,7 +45,12 @@ export default function DashboardScreen() {
   const isAdmin = userRole === "admin";
   const { width } = useWindowDimensions();
 
-  const [period, setPeriod] = useState("month"); // "day" | "week" | "month"
+  const [period, setPeriod] = useState("month"); // "day" | "week" | "month" | "custom"
+  const [customRange, setCustomRange] = useState(() => ({
+    startDate: toDateStr(new Date()),
+    endDate: toDateStr(new Date()),
+  }));
+  const [showCustomModal, setShowCustomModal] = useState(false);
 
   const [summary, setSummary] = useState({
     patients_today: null,
@@ -59,12 +70,15 @@ export default function DashboardScreen() {
   });
   const [summaryLoading, setSummaryLoading] = useState(true);
 
-  const loadSummary = useCallback(async (selectedPeriod) => {
+  const loadSummary = useCallback(async (selectedPeriod, range) => {
     try {
       setSummaryLoading(true);
-      const res = await getDashboardSummary(selectedPeriod);
+      const res = await getDashboardSummary(selectedPeriod, range);
       if (res.ok && res.data?.data) {
         setSummary(res.data.data);
+      } else if (!res.ok) {
+        const msg = res.data?.detail || res.data?.message;
+        if (typeof msg === "string") console.error("DASHBOARD SUMMARY LOAD ERROR", msg);
       }
     } catch (e) {
       console.error("DASHBOARD SUMMARY LOAD ERROR", e);
@@ -74,13 +88,13 @@ export default function DashboardScreen() {
   }, []);
 
   useEffect(() => {
-    loadSummary(period);
-  }, [loadSummary, period]);
+    loadSummary(period, customRange);
+  }, [loadSummary, period, customRange]);
 
   useFocusEffect(
     useCallback(() => {
-      loadSummary(period);
-    }, [loadSummary, period])
+      loadSummary(period, customRange);
+    }, [loadSummary, period, customRange])
   );
 
   const [appointments, setAppointments] = useState([]);
@@ -156,9 +170,17 @@ export default function DashboardScreen() {
     })}`;
   };
 
-  const PERIOD_LABELS = { day: "Today", week: "This Week", month: "This Month" };
+  const PERIOD_LABELS = { day: "Today", week: "This Week", month: "This Month", custom: "Custom Range" };
   const periodLabel = summary.period_label || PERIOD_LABELS[period];
   const isProfit = (summary.profit_loss ?? 0) >= 0;
+
+  const handlePeriodSelect = (key) => {
+    if (key === "custom") {
+      setShowCustomModal(true);
+    } else {
+      setPeriod(key);
+    }
+  };
 
   const styles = getStyles(theme, mode);
 
@@ -306,7 +328,7 @@ export default function DashboardScreen() {
                 </Text>
               </View>
 
-              <PeriodSelector value={period} onChange={setPeriod} theme={theme} mode={mode} />
+              <PeriodSelector value={period} onChange={handlePeriodSelect} theme={theme} mode={mode} />
             </View>
           </View>
 
@@ -485,6 +507,19 @@ export default function DashboardScreen() {
           <View style={{ height: 30 }} />
         </Animated.View>
       </ScrollView>
+
+      <CustomRangeModal
+        visible={showCustomModal}
+        initialRange={customRange}
+        onClose={() => setShowCustomModal(false)}
+        onApply={(range) => {
+          setCustomRange(range);
+          setPeriod("custom");
+          setShowCustomModal(false);
+        }}
+        theme={theme}
+        mode={mode}
+      />
     </View>
   );
 }
@@ -551,6 +586,7 @@ function PeriodSelector({ value, onChange, theme, mode }) {
     { key: "day", label: "Day" },
     { key: "week", label: "Week" },
     { key: "month", label: "Month" },
+    { key: "custom", label: "Custom", icon: "calendar-outline" },
   ];
   const borderColor = mode === "light" ? "#e5e7eb" : "#2a2a2a";
 
@@ -570,9 +606,13 @@ function PeriodSelector({ value, onChange, theme, mode }) {
             onPress={() => onChange(opt.key)}
             style={[
               stylesGlobal.periodOption,
+              stylesGlobal.periodOptionRow,
               active && { backgroundColor: theme.primary },
             ]}
           >
+            {!!opt.icon && (
+              <Icon name={opt.icon} size={13} color={active ? "#fff" : theme.subText} />
+            )}
             <Text
               style={[
                 stylesGlobal.periodOptionText,
@@ -585,6 +625,112 @@ function PeriodSelector({ value, onChange, theme, mode }) {
         );
       })}
     </View>
+  );
+}
+
+function CustomRangeModal({ visible, onClose, initialRange, onApply, theme, mode }) {
+  const isDark = mode === "dark";
+  const [startDate, setStartDate] = useState(initialRange.startDate);
+  const [endDate, setEndDate] = useState(initialRange.endDate);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (visible) {
+      setStartDate(initialRange.startDate);
+      setEndDate(initialRange.endDate);
+      setError("");
+    }
+  }, [visible, initialRange.startDate, initialRange.endDate]);
+
+  const parseDate = (s) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date());
+
+  const handleApply = () => {
+    if (new Date(`${startDate}T00:00:00`) > new Date(`${endDate}T00:00:00`)) {
+      setError("Start date must be on or before end date.");
+      return;
+    }
+    onApply({ startDate, endDate });
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={stylesGlobal.customModalOverlay} onPress={onClose}>
+        <Pressable
+          style={[stylesGlobal.customModalSheet, { backgroundColor: isDark ? "#0f172a" : "#ffffff" }]}
+          onPress={() => {}}
+        >
+          <View style={stylesGlobal.customModalHeader}>
+            <Text style={[stylesGlobal.customModalTitle, { color: theme.text }]}>Custom Date Range</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Icon name="close" size={22} color={theme.subText} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={[stylesGlobal.customModalLabel, { color: theme.subText }]}>From</Text>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowStartPicker(true)}
+            style={[
+              stylesGlobal.customModalField,
+              { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" },
+            ]}
+          >
+            <Text style={{ color: theme.text, fontWeight: "600" }}>{startDate}</Text>
+            <Icon name="calendar-outline" size={18} color="#94a3b8" />
+          </TouchableOpacity>
+          {showStartPicker && (
+            <DateTimePicker
+              value={parseDate(startDate)}
+              mode="date"
+              display={Platform.OS === "ios" ? "spinner" : "default"}
+              maximumDate={new Date()}
+              onChange={(event, date) => {
+                setShowStartPicker(Platform.OS === "ios");
+                if (event.type !== "dismissed" && date) setStartDate(toDateStr(date));
+                if (Platform.OS !== "ios") setShowStartPicker(false);
+              }}
+            />
+          )}
+
+          <Text style={[stylesGlobal.customModalLabel, { color: theme.subText }]}>To</Text>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowEndPicker(true)}
+            style={[
+              stylesGlobal.customModalField,
+              { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" },
+            ]}
+          >
+            <Text style={{ color: theme.text, fontWeight: "600" }}>{endDate}</Text>
+            <Icon name="calendar-outline" size={18} color="#94a3b8" />
+          </TouchableOpacity>
+          {showEndPicker && (
+            <DateTimePicker
+              value={parseDate(endDate)}
+              mode="date"
+              display={Platform.OS === "ios" ? "spinner" : "default"}
+              maximumDate={new Date()}
+              onChange={(event, date) => {
+                setShowEndPicker(Platform.OS === "ios");
+                if (event.type !== "dismissed" && date) setEndDate(toDateStr(date));
+                if (Platform.OS !== "ios") setShowEndPicker(false);
+              }}
+            />
+          )}
+
+          {!!error && <Text style={stylesGlobal.customModalError}>{error}</Text>}
+
+          <TouchableOpacity
+            style={[stylesGlobal.customModalApplyBtn, { backgroundColor: theme.primary }]}
+            onPress={handleApply}
+          >
+            <Text style={stylesGlobal.customModalApplyText}>Apply</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -1007,9 +1153,80 @@ const stylesGlobal = StyleSheet.create({
     borderRadius: 10,
   },
 
+  periodOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+
   periodOptionText: {
     fontSize: 13,
     fontWeight: "700",
+  },
+
+  /* ===== CUSTOM RANGE MODAL ===== */
+  customModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+
+  customModalSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 32,
+  },
+
+  customModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+
+  customModalTitle: {
+    fontSize: 17,
+    fontWeight: "900",
+  },
+
+  customModalLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 6,
+    marginTop: 12,
+  },
+
+  customModalField: {
+    height: 48,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.15)",
+  },
+
+  customModalError: {
+    color: "#ef4444",
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 10,
+  },
+
+  customModalApplyBtn: {
+    height: 50,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 20,
+  },
+
+  customModalApplyText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 15,
   },
 
   kpiTrack: {

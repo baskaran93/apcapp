@@ -327,10 +327,15 @@ export const getDistinctDiagnoses = async () => {
   }
 };
 
-export const getDashboardSummary = async (period = "month") => {
+export const getDashboardSummary = async (period = "month", customRange = {}) => {
   try {
     const token = await AsyncStorage.getItem("token");
-    const response = await fetch(`${BASE_URL}/dashboard/summary/?period=${period}`, {
+    let url = `${BASE_URL}/dashboard/summary/?period=${period}`;
+    if (period === "custom") {
+      const { startDate, endDate } = customRange;
+      url += `&start_date=${encodeURIComponent(startDate || "")}&end_date=${encodeURIComponent(endDate || "")}`;
+    }
+    const response = await fetch(url, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
