@@ -13,6 +13,7 @@ import {
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { Ionicons as Icon } from "@expo/vector-icons";
 import { ThemeContext } from "../theme/ThemeContext";
+import { AuthContext } from "../context/AuthContext";
 import { LinearGradient } from "expo-linear-gradient";
 import { getDashboardSummary, getAppointments } from "../services/api";
 
@@ -34,19 +35,34 @@ const formatApptDate = (val) => {
 export default function DashboardScreen() {
   const navigation = useNavigation();
   const { theme, mode, toggleTheme } = useContext(ThemeContext);
+  const { userRole } = useContext(AuthContext);
+  const isAdmin = userRole === "admin";
   const { width } = useWindowDimensions();
+
+  const [period, setPeriod] = useState("month"); // "day" | "week" | "month"
 
   const [summary, setSummary] = useState({
     patients_today: null,
     appointments_today: null,
     consultations_today: null,
+    income_today: null,
+    expenses_today: null,
     revenue_today: null,
+    period: "month",
+    period_label: "This Month",
+    income_period: null,
+    expenses_period: null,
+    profit_loss: null,
+    profit_margin: null,
+    profit_loss_status: null,
+    walkins_period: null,
   });
   const [summaryLoading, setSummaryLoading] = useState(true);
 
-  const loadSummary = useCallback(async () => {
+  const loadSummary = useCallback(async (selectedPeriod) => {
     try {
-      const res = await getDashboardSummary();
+      setSummaryLoading(true);
+      const res = await getDashboardSummary(selectedPeriod);
       if (res.ok && res.data?.data) {
         setSummary(res.data.data);
       }
@@ -58,13 +74,13 @@ export default function DashboardScreen() {
   }, []);
 
   useEffect(() => {
-    loadSummary();
-  }, [loadSummary]);
+    loadSummary(period);
+  }, [loadSummary, period]);
 
   useFocusEffect(
     useCallback(() => {
-      loadSummary();
-    }, [loadSummary])
+      loadSummary(period);
+    }, [loadSummary, period])
   );
 
   const [appointments, setAppointments] = useState([]);
@@ -131,6 +147,19 @@ export default function DashboardScreen() {
   const fmt = (val, prefix = "") =>
     summaryLoading || val === null || val === undefined ? "—" : `${prefix}${val}`;
 
+  const fmtCurrency = (val) => {
+    if (summaryLoading || val === null || val === undefined) return "—";
+    const num = Number(val);
+    const sign = num < 0 ? "-" : "";
+    return `${sign}₹${Math.abs(num).toLocaleString("en-IN", {
+      maximumFractionDigits: 0,
+    })}`;
+  };
+
+  const PERIOD_LABELS = { day: "Today", week: "This Week", month: "This Month" };
+  const periodLabel = summary.period_label || PERIOD_LABELS[period];
+  const isProfit = (summary.profit_loss ?? 0) >= 0;
+
   const styles = getStyles(theme, mode);
 
   // Responsive columns
@@ -138,7 +167,7 @@ export default function DashboardScreen() {
 
   const GAP = 16;
   const H_PADDING = width >= 900 ? 48 : 32;
-  const cardWidth = (width - H_PADDING - GAP * (columns - 1)) / columns;
+  const cardWidth = Math.floor((width - H_PADDING - GAP * (columns - 1)) / columns);
 
   // Animation
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -265,13 +294,64 @@ export default function DashboardScreen() {
               theme={theme}
               mode={mode}
             />
+          </View>
+
+          {/* ===== BUSINESS OVERVIEW ===== */}
+          <View style={styles.sectionHead}>
+            <View style={styles.sectionHeadRow}>
+              <View>
+                <Text style={styles.sectionTitle}>Business Overview</Text>
+                <Text style={styles.sectionSub}>
+                  Showing figures for {periodLabel.toLowerCase()}
+                </Text>
+              </View>
+
+              <PeriodSelector value={period} onChange={setPeriod} theme={theme} mode={mode} />
+            </View>
+          </View>
+
+          <View style={styles.gridRow}>
+            <KpiCard
+              icon="walk-outline"
+              label={`Walk-ins · ${periodLabel}`}
+              value={fmt(summary.walkins_period)}
+              width={cardWidth}
+              accent="#0ea5e9"
+              theme={theme}
+              mode={mode}
+            />
 
             <KpiCard
               icon="cash-outline"
-              label="Revenue"
-              value={fmt(summary.revenue_today, "₹")}
+              label={`Revenue · ${periodLabel}`}
+              value={fmtCurrency(summary.income_period)}
               width={cardWidth}
               accent="#a855f7"
+              theme={theme}
+              mode={mode}
+            />
+
+            <KpiCard
+              icon="wallet-outline"
+              label={`Expenses · ${periodLabel}`}
+              value={fmtCurrency(summary.expenses_period)}
+              width={cardWidth}
+              accent="#ef4444"
+              theme={theme}
+              mode={mode}
+            />
+
+            <KpiCard
+              icon={isProfit ? "trending-up-outline" : "trending-down-outline"}
+              label={isProfit ? `Profit · ${periodLabel}` : `Loss · ${periodLabel}`}
+              value={fmtCurrency(summary.profit_loss)}
+              caption={
+                summaryLoading || summary.profit_margin === null || summary.profit_margin === undefined
+                  ? null
+                  : `${summary.profit_margin}% margin`
+              }
+              width={cardWidth}
+              accent={isProfit ? "#22c55e" : "#ef4444"}
               theme={theme}
               mode={mode}
             />
@@ -341,6 +421,20 @@ export default function DashboardScreen() {
               mode={mode}
               onPress={() => navigation.navigate("Home", { screen: "Billing" })}
             />
+
+            {isAdmin && (
+              <ActionTile
+                icon="wallet-outline"
+                title="Office Expenses"
+                subtitle="Track clinic expenses"
+                width={cardWidth}
+                theme={theme}
+                mode={mode}
+                onPress={() =>
+                  navigation.navigate("Home", { screen: "Office Expenses" })
+                }
+              />
+            )}
           </View>
 
           {/* ===== ANALYTICS ===== */}
@@ -399,7 +493,7 @@ export default function DashboardScreen() {
 /* ===== COMPONENTS ======== */
 /* ========================= */
 
-function KpiCard({ icon, label, value, accent, width, theme, mode }) {
+function KpiCard({ icon, label, value, caption, accent, width, theme, mode }) {
   return (
     <View
       style={[
@@ -428,9 +522,17 @@ function KpiCard({ icon, label, value, accent, width, theme, mode }) {
         {value}
       </Text>
 
-      <Text style={[stylesGlobal.kpiLabel, { color: theme.subText }]}>
-        {label}
-      </Text>
+      <View style={stylesGlobal.kpiLabelRow}>
+        <Text style={[stylesGlobal.kpiLabel, { color: theme.subText }]}>
+          {label}
+        </Text>
+
+        {!!caption && (
+          <View style={[stylesGlobal.kpiCaptionPill, { backgroundColor: accent + "22" }]}>
+            <Text style={[stylesGlobal.kpiCaptionText, { color: accent }]}>{caption}</Text>
+          </View>
+        )}
+      </View>
 
       <View style={[stylesGlobal.kpiTrack, { backgroundColor: accent + "33" }]}>
         <View
@@ -440,6 +542,48 @@ function KpiCard({ icon, label, value, accent, width, theme, mode }) {
           ]}
         />
       </View>
+    </View>
+  );
+}
+
+function PeriodSelector({ value, onChange, theme, mode }) {
+  const options = [
+    { key: "day", label: "Day" },
+    { key: "week", label: "Week" },
+    { key: "month", label: "Month" },
+  ];
+  const borderColor = mode === "light" ? "#e5e7eb" : "#2a2a2a";
+
+  return (
+    <View
+      style={[
+        stylesGlobal.periodSelector,
+        { backgroundColor: theme.card, borderColor },
+      ]}
+    >
+      {options.map((opt) => {
+        const active = value === opt.key;
+        return (
+          <TouchableOpacity
+            key={opt.key}
+            activeOpacity={0.85}
+            onPress={() => onChange(opt.key)}
+            style={[
+              stylesGlobal.periodOption,
+              active && { backgroundColor: theme.primary },
+            ]}
+          >
+            <Text
+              style={[
+                stylesGlobal.periodOptionText,
+                { color: active ? "#fff" : theme.subText },
+              ]}
+            >
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
@@ -741,6 +885,8 @@ const getStyles = (theme, mode) =>
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "flex-end",
+      flexWrap: "wrap",
+      gap: 12,
     },
 
     sectionTitle: {
@@ -822,10 +968,48 @@ const stylesGlobal = StyleSheet.create({
     fontWeight: "900",
   },
 
-  kpiLabel: {
+  kpiLabelRow: {
     marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+
+  kpiLabel: {
     fontSize: 13,
     fontWeight: "600",
+  },
+
+  kpiCaptionPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+
+  kpiCaptionText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+
+  /* ===== PERIOD SELECTOR ===== */
+  periodSelector: {
+    flexDirection: "row",
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 4,
+    gap: 4,
+  },
+
+  periodOption: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+
+  periodOptionText: {
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   kpiTrack: {
