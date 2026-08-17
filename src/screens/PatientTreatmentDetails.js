@@ -8,15 +8,16 @@ import {
     StyleSheet,
     ActivityIndicator,
     Alert,
-    SafeAreaView,
     StatusBar,
     Modal,
+    Pressable,
     Platform,
     ScrollView,
     Dimensions,
     KeyboardAvoidingView,
 } from "react-native";
-import { getPatients, getTreatmentCharges, registerTreatment, updateTreatment, getTreatmentHistory, getDistinctDiagnoses, getDistinctPhysiotherapists, deleteTreatment } from "../services/api";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { getPatients, getTreatmentCharges, registerTreatment, updateTreatment, getTreatmentHistory, getDistinctDiagnoses, getUsers, deleteTreatment, getAssessmentFile } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
 import { AuthContext } from "../context/AuthContext";
 import { hasPermission } from "../utils/permissions";
@@ -53,7 +54,6 @@ const PatientTreatmentDetails = () => {
 
     const [selectedPatient, setSelectedPatient] = useState(initialPatient);
     const [patientSearch, setPatientSearch] = useState("");
-    const [filteredPatients, setFilteredPatients] = useState([]);
     const [diagnosis, setDiagnosis] = useState("");
     const [doctorName, setDoctorName] = useState("");
     const [notes, setNotes] = useState("");
@@ -63,6 +63,7 @@ const PatientTreatmentDetails = () => {
     const [assessmentFile, setAssessmentFile] = useState(null);
     const [editingSessionId, setEditingSessionId] = useState(null);
     const [existingAssessmentFileName, setExistingAssessmentFileName] = useState(null);
+    const [viewingFileId, setViewingFileId] = useState(null);
 
     // New Master Treatment States
     const [showAddMasterModal, setShowAddMasterModal] = useState(false);
@@ -70,16 +71,11 @@ const PatientTreatmentDetails = () => {
     const [newMasterCost, setNewMasterCost] = useState("");
     const [savingMaster, setSavingMaster] = useState(false);
 
-    // Physiotherapist Suggestions State
-    const [showPhysioSuggestions, setShowPhysioSuggestions] = useState(false);
-    const [physioMasters, setPhysioMasters] = useState([]);
-    const physioSuggestions = useMemo(() => {
-        if (!doctorName) return [];
-        return physioMasters.filter(p => 
-            p.toLowerCase().includes(doctorName.toLowerCase()) && 
-            p.toLowerCase() !== doctorName.toLowerCase()
-        );
-    }, [doctorName, physioMasters]);
+    // Physiotherapist selection — sourced from Manage Users, restricted to
+    // accounts whose designation is "Doctor" (not the login role, which is
+    // separate: role gates app access, designation is the job title).
+    const [showDoctorPicker, setShowDoctorPicker] = useState(false);
+    const [doctorUsers, setDoctorUsers] = useState([]);
 
     // Diagnosis Suggestions State
     const [showDiagnosisSuggestions, setShowDiagnosisSuggestions] = useState(false);
@@ -151,6 +147,43 @@ const PatientTreatmentDetails = () => {
         });
         return unsubscribe;
     }, [navigation, selectedPatient, route.params?.newTreatment]);
+
+    const handleViewAssessmentFile = async (sessionId) => {
+        if (!sessionId) return;
+        try {
+            setViewingFileId(sessionId);
+            const res = await getAssessmentFile(sessionId);
+            if (!res.ok) {
+                const msg = res.data?.detail || res.data?.message || "Failed to load assessment form.";
+                Alert.alert("Error", typeof msg === "string" ? msg : JSON.stringify(msg));
+                return;
+            }
+            const { filename, content_type, content_base64 } = res.data?.data || {};
+            if (!content_base64) {
+                Alert.alert("Error", "No assessment form found for this record.");
+                return;
+            }
+
+            if (Platform.OS === "web") {
+                const byteChars = atob(content_base64);
+                const byteNumbers = new Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+                const blob = new Blob([new Uint8Array(byteNumbers)], { type: content_type || "application/octet-stream" });
+                const url = URL.createObjectURL(blob);
+                window.open(url, "_blank");
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            } else {
+                const uri = FileSystem.cacheDirectory + (filename || `assessment_${sessionId}`);
+                await FileSystem.writeAsStringAsync(uri, content_base64, { encoding: FileSystem.EncodingType.Base64 });
+                await Sharing.shareAsync(uri, { mimeType: content_type || "application/octet-stream", dialogTitle: filename || "Assessment Form" });
+            }
+        } catch (error) {
+            console.error("VIEW ASSESSMENT FILE ERROR", error);
+            Alert.alert("Error", "Failed to open the assessment form.");
+        } finally {
+            setViewingFileId(null);
+        }
+    };
 
     const handleFileUpload = async () => {
         try {
@@ -228,12 +261,15 @@ const PatientTreatmentDetails = () => {
         }
     };
 
-    const loadPhysiotherapists = async () => {
+    const loadDoctorUsers = async () => {
         try {
-            const res = await getDistinctPhysiotherapists();
-            if (res.ok) setPhysioMasters(res.data?.data || []);
+            const res = await getUsers();
+            if (res.ok) {
+                const users = res.data?.data || [];
+                setDoctorUsers(users.filter(u => (u.designation_name || "").toLowerCase().includes("doctor")));
+            }
         } catch (e) {
-            console.error("Failed to load physiotherapists", e);
+            console.error("Failed to load doctor users", e);
         }
     };
 
@@ -265,7 +301,6 @@ const PatientTreatmentDetails = () => {
                 else if (patientsRes.data.data) data = patientsRes.data.data;
 
                 setPatients(data);
-                setFilteredPatients(data);
             }
 
             if (chargesRes.ok) {
@@ -274,7 +309,7 @@ const PatientTreatmentDetails = () => {
             
             await Promise.all([
                 loadGlobalDiagnoses(),
-                loadPhysiotherapists()
+                loadDoctorUsers()
             ]);
         } catch (error) {
             console.error("DATA LOAD ERROR", error);
@@ -571,21 +606,15 @@ const PatientTreatmentDetails = () => {
         }
     };
 
-    useEffect(() => {
-        console.log("Filtering patients for search:", patientSearch);
-        if (patientSearch.trim() === "") {
-            setFilteredPatients(patients);
-        } else {
-            const searchLower = patientSearch.toLowerCase();
-            const filtered = patients.filter(p => {
-                const nameMatch = p.name ? p.name.toLowerCase().includes(searchLower) : false;
-                const idMatch = p.id ? p.id.toString().includes(searchLower) : false;
-                const phoneMatch = p.phone_number ? p.phone_number.includes(searchLower) : false;
-                return nameMatch || idMatch || phoneMatch;
-            });
-            console.log("Filtered matches count:", filtered.length);
-            setFilteredPatients(filtered);
-        }
+    const patientSearchResults = useMemo(() => {
+        if (!patientSearch.trim()) return [];
+        const searchLower = patientSearch.toLowerCase();
+        return patients.filter(p => {
+            const nameMatch = (p.name || p.patient_name) ? (p.name || p.patient_name).toLowerCase().includes(searchLower) : false;
+            const idMatch = p.id ? p.id.toString().toLowerCase().includes(searchLower) : false;
+            const phoneMatch = p.phone_number ? p.phone_number.includes(searchLower) : false;
+            return nameMatch || idMatch || phoneMatch;
+        }).slice(0, 5);
     }, [patientSearch, patients]);
 
 
@@ -704,7 +733,6 @@ const PatientTreatmentDetails = () => {
                 // Refresh history
                 loadHistory(patientId);
                 loadGlobalDiagnoses(); // Refresh global list too
-                loadPhysiotherapists(); // Refresh physiotherapists too
             } else {
                 console.error("SAVE FAILED:", response.data);
                 const errorMsg = response.data?.detail || response.data?.message || response.data?.error || "Failed to save treatment.";
@@ -791,7 +819,7 @@ const PatientTreatmentDetails = () => {
                             <View style={[styles.inputWrap, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}>
                                 <Icon name="search-outline" size={20} color="#94a3b8" />
                                 <TextInput
-                                    placeholder="Search Patient Name..."
+                                    placeholder="Search Patient Name, ID, or Phone..."
                                     placeholderTextColor="#94a3b8"
                                     style={[styles.textInput, { color: theme.text }]}
                                     value={patientSearch}
@@ -802,10 +830,10 @@ const PatientTreatmentDetails = () => {
 
                         {!selectedPatient && patientSearch.length > 0 && (
                             <View style={styles.patientResults}>
-                                {patients.filter(p => (p.name || p.patient_name || "").toLowerCase().includes(patientSearch.toLowerCase())).slice(0, 5).map(p => (
+                                {patientSearchResults.map(p => (
                                     <TouchableOpacity key={p.id} onPress={() => { setSelectedPatient(p); setPatientSearch(""); }} style={styles.resultItem}>
                                         <Text style={{ color: theme.text, fontWeight: '600' }}>{p.name || p.patient_name}</Text>
-                                        <Text style={{ color: theme.subText, fontSize: 12 }}>{p.phone_number}</Text>
+                                        <Text style={{ color: theme.subText, fontSize: 12 }}>{p.id} • {p.phone_number}</Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
@@ -864,6 +892,24 @@ const PatientTreatmentDetails = () => {
                                     </TouchableOpacity>
                                 )}
                             </TouchableOpacity>
+
+                            {existingAssessmentFileName && !assessmentFile && (
+                                <TouchableOpacity
+                                    onPress={() => handleViewAssessmentFile(editingSessionId)}
+                                    disabled={viewingFileId === editingSessionId}
+                                    style={styles.viewFileLink}
+                                >
+                                    {viewingFileId === editingSessionId ? (
+                                        <ActivityIndicator size="small" color={theme.primary} />
+                                    ) : (
+                                        <>
+                                            <Icon name="eye-outline" size={14} color={theme.primary} />
+                                            <Text style={[styles.viewFileLinkText, { color: theme.primary }]}>View uploaded form</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            )}
+
                             <Text style={styles.hintText}>Required for the first time we need to upload filled assessment form</Text>
                         </View>
 
@@ -908,30 +954,20 @@ const PatientTreatmentDetails = () => {
                         <View style={[styles.fieldRow, { zIndex: 2000, elevation: 2000 }]}>
                             <View style={{ flex: 1, marginRight: 10, zIndex: 2000, elevation: 2000 }}>
                                 <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569" }]}>Physiotherapist Name</Text>
-                                <View style={[styles.inputWrap, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}>
-                                    <TextInput
-                                        placeholder="Enter name..."
-                                        placeholderTextColor="#94a3b8"
-                                        style={[styles.textInput, { color: theme.text }]}
-                                        value={doctorName}
-                                        onChangeText={(text) => {
-                                            setDoctorName(text);
-                                            setShowPhysioSuggestions(true);
-                                        }}
-                                        onBlur={() => setTimeout(() => setShowPhysioSuggestions(false), 200)}
-                                        onFocus={() => setShowPhysioSuggestions(true)}
-                                    />
-                                </View>
-                                {showPhysioSuggestions && physioSuggestions.length > 0 && (
-                                    <View style={[styles.suggestionList, { backgroundColor: theme.card, borderColor: theme.border, zIndex: 9999, elevation: 9999 }]}>
-                                        {physioSuggestions.map((s, idx) => (
-                                            <TouchableOpacity key={idx} onPress={() => { setDoctorName(s); setShowPhysioSuggestions(false); }} style={styles.suggestionItem}>
-                                                <Icon name="person-outline" size={14} color="#94a3b8" />
-                                                <Text style={{ color: theme.text, marginLeft: 8 }}>{s}</Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                )}
+                                <TouchableOpacity
+                                    activeOpacity={0.8}
+                                    onPress={() => setShowDoctorPicker(true)}
+                                    style={[styles.inputWrap, { backgroundColor: isDark ? "rgba(2,6,23,0.5)" : "#f8fafc" }]}
+                                >
+                                    <Icon name="person-outline" size={18} color="#94a3b8" />
+                                    <Text
+                                        numberOfLines={1}
+                                        style={[styles.textInput, { color: doctorName ? theme.text : "#94a3b8" }]}
+                                    >
+                                        {doctorName || "Select physiotherapist"}
+                                    </Text>
+                                    <Icon name="chevron-down-outline" size={16} color="#94a3b8" />
+                                </TouchableOpacity>
                             </View>
                             <View style={{ flex: 1 }}>
                                 <Text style={[styles.fieldLabel, { color: isDark ? "#cbd5e1" : "#475569" }]}>Notes</Text>
@@ -964,7 +1000,23 @@ const PatientTreatmentDetails = () => {
                                     </View>
                                     <View style={{ alignItems: 'flex-end' }}>
                                         <Text style={{ color: theme.primary, fontWeight: '800' }}>₹{h.items?.reduce((s, it) => s + (it.cost || 0), 0) || 0}</Text>
-                                        <View style={{ flexDirection: 'row', marginTop: 8, gap: 8 }}>
+                                        <View style={{ flexDirection: 'row', marginTop: 8, gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                            {h.has_assessment_file && (
+                                                <TouchableOpacity
+                                                    onPress={() => handleViewAssessmentFile(h.id)}
+                                                    disabled={viewingFileId === h.id}
+                                                    style={[styles.miniBtn, { backgroundColor: "#22c55e18" }]}
+                                                >
+                                                    {viewingFileId === h.id ? (
+                                                        <ActivityIndicator size="small" color="#22c55e" />
+                                                    ) : (
+                                                        <>
+                                                            <Icon name="eye-outline" size={14} color="#22c55e" />
+                                                            <Text style={{ color: "#22c55e", fontSize: 11, fontWeight: '700', marginLeft: 4 }}>Form</Text>
+                                                        </>
+                                                    )}
+                                                </TouchableOpacity>
+                                            )}
                                             <TouchableOpacity onPress={() => generateBillPDF(h, "a5")} style={[styles.miniBtn, { backgroundColor: theme.primary + "15" }]}>
                                                 <Icon name="download-outline" size={14} color={theme.primary} />
                                                 <Text style={{ color: theme.primary, fontSize: 11, fontWeight: '700', marginLeft: 4 }}>A5</Text>
@@ -1079,6 +1131,57 @@ const PatientTreatmentDetails = () => {
                         </View>
                     </View>
                 </View>
+            </Modal>
+
+            {/* Physiotherapist Picker */}
+            <Modal
+                visible={showDoctorPicker}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowDoctorPicker(false)}
+            >
+                <Pressable style={styles.pickerOverlay} onPress={() => setShowDoctorPicker(false)}>
+                    <Pressable
+                        style={[styles.pickerSheet, { backgroundColor: isDark ? "#0f172a" : "#ffffff" }]}
+                        onPress={() => {}}
+                    >
+                        <View style={styles.pickerHeader}>
+                            <Text style={[styles.pickerTitle, { color: theme.text }]}>Physiotherapist</Text>
+                            <TouchableOpacity onPress={() => setShowDoctorPicker(false)}>
+                                <Icon name="close" size={22} color={theme.subText} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+                            {doctorUsers.length === 0 ? (
+                                <Text style={[styles.pickerEmptyText, { color: theme.subText }]}>
+                                    No users with the "Doctor" designation yet. Add one from Settings → Manage Users.
+                                </Text>
+                            ) : (
+                                doctorUsers.map((u) => {
+                                    const selected = doctorName === u.username;
+                                    return (
+                                        <TouchableOpacity
+                                            key={u.id}
+                                            style={styles.pickerOptionRow}
+                                            onPress={() => {
+                                                setDoctorName(u.username);
+                                                setShowDoctorPicker(false);
+                                            }}
+                                        >
+                                            <Text style={{ color: theme.text, fontWeight: selected ? "800" : "600" }}>
+                                                {u.username}
+                                            </Text>
+                                            {selected && (
+                                                <Icon name="checkmark" size={18} color={isDark ? "#3b82f6" : "#2563eb"} />
+                                            )}
+                                        </TouchableOpacity>
+                                    );
+                                })
+                            )}
+                        </ScrollView>
+                    </Pressable>
+                </Pressable>
             </Modal>
         </View>
     );
@@ -1225,6 +1328,39 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(148, 163, 184, 0.05)",
         overflow: "hidden",
     },
+    /* Physiotherapist picker */
+    pickerOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.5)",
+        justifyContent: "flex-end",
+    },
+    pickerSheet: {
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: 20,
+        paddingBottom: 32,
+    },
+    pickerHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 16,
+    },
+    pickerTitle: { fontSize: 17, fontWeight: "900" },
+    pickerOptionRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        paddingVertical: 14,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: "rgba(148,163,184,0.25)",
+    },
+    pickerEmptyText: {
+        fontSize: 13,
+        textAlign: "center",
+        paddingVertical: 24,
+        lineHeight: 18,
+    },
     resultItem: {
         padding: 12,
         borderBottomWidth: 1,
@@ -1265,6 +1401,17 @@ const styles = StyleSheet.create({
         color: "#94a3b8",
         marginTop: 6,
         marginLeft: 2,
+    },
+    viewFileLink: {
+        flexDirection: "row",
+        alignItems: "center",
+        alignSelf: "flex-start",
+        marginTop: 10,
+        gap: 5,
+    },
+    viewFileLinkText: {
+        fontSize: 12,
+        fontWeight: "700",
     },
     addTreatmentBtn: {
         flexDirection: "row",

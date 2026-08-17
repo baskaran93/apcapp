@@ -665,6 +665,24 @@ export const updateTreatment = async (sessionId, payload) => {
   }
 };
 
+export const getAssessmentFile = async (sessionId) => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    const response = await fetch(`${BASE_URL}/patient/treatement/details/${sessionId}/assessment-file/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const result = await response.json();
+    return { ok: response.ok, data: result };
+  } catch (error) {
+    console.error("API Get Assessment File Error:", error);
+    return { ok: false, data: null, error: String(error) };
+  }
+};
+
 export const deleteTreatment = async (sessionId) => {
   try {
     const token = await AsyncStorage.getItem("token");
