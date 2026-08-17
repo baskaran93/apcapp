@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   Modal,
   Switch,
@@ -19,6 +18,7 @@ import {
   PanResponder,
   KeyboardAvoidingView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { getPatients, deletePatient } from "../services/api";
@@ -271,8 +271,9 @@ const PatientListScreen = () => {
   const [showSort, setShowSort] = useState(false);
   const [sortFieldSearch, setSortFieldSearch] = useState("");
 
-  // ✅ Custom sort selection — ordered list of { key, dir } rules, applied in priority order
-  const [sortRules, setSortRules] = useState([]);
+  // ✅ Custom sort selection — ordered list of { key, dir } rules, applied in priority order.
+  // Defaults to patient ID descending (newest-registered first).
+  const [sortRules, setSortRules] = useState([{ key: "id", dir: "desc" }]);
 
   // ✅ Column Filters State
   const [columnFilters, setColumnFilters] = useState({});
@@ -321,6 +322,10 @@ const PatientListScreen = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const goToTreatment = (item) => {
+    navigation.navigate("Home", { screen: "Patient Treatment", params: { patient: item } });
   };
 
   const handleDeletePatient = (item) => {
@@ -659,15 +664,26 @@ const PatientListScreen = () => {
             </View>
           ) : null}
 
-          {canDeletePatient && (
+          <View style={styles.mobileActionsRow}>
             <TouchableOpacity
-              onPress={() => handleDeletePatient(item)}
-              style={styles.mobileDeleteBtn}
+              onPress={() => goToTreatment(item)}
+              style={[styles.mobileTreatmentBtn, { backgroundColor: theme.primary + "18" }]}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Icon name="trash-outline" size={16} color="#ef4444" />
+              <Icon name="medkit-outline" size={14} color={theme.primary} />
+              <Text style={[styles.mobileTreatmentBtnText, { color: theme.primary }]}>Treatment</Text>
             </TouchableOpacity>
-          )}
+
+            {canDeletePatient && (
+              <TouchableOpacity
+                onPress={() => handleDeletePatient(item)}
+                style={styles.mobileDeleteBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Icon name="trash-outline" size={16} color="#ef4444" />
+              </TouchableOpacity>
+            )}
+          </View>
         </TouchableOpacity>
       );
     }
@@ -781,7 +797,12 @@ const PatientListScreen = () => {
           );
         })}
 
-        <View style={{ flexDirection: "row", width: 80, justifyContent: "flex-end", gap: 6 }}>
+        <View style={{ flexDirection: "row", width: 120, justifyContent: "flex-end", gap: 6 }}>
+          <TouchableOpacity style={styles.editBtn} onPress={() => goToTreatment(item)}>
+            <View style={[styles.editIconWrap, { backgroundColor: "#22c55e22" }]}>
+              <Icon name="medkit-outline" size={18} color="#22c55e" />
+            </View>
+          </TouchableOpacity>
           {canEditPatient && (
             <TouchableOpacity
               style={styles.editBtn}
@@ -1090,10 +1111,10 @@ const PatientListScreen = () => {
                           style={[
                             styles.headerCell,
                             isWeb && styles.headerCellWeb,
-                            { width: 80, color: theme.subText },
+                            { width: 120, color: theme.subText },
                           ]}
                         >
-                          Edit
+                          Actions
                         </Text>
                       </View>
                     )}
@@ -1748,7 +1769,7 @@ const styles = StyleSheet.create({
   },
 
   editBtn: {
-    width: 80,
+    width: 40,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1814,9 +1835,28 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  mobileDeleteBtn: {
-    alignSelf: "flex-end",
+  mobileActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginTop: 10,
+  },
+
+  mobileTreatmentBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+
+  mobileTreatmentBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  mobileDeleteBtn: {
     padding: 4,
   },
 
