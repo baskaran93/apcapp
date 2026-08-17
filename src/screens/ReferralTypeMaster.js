@@ -8,12 +8,12 @@ import {
     StyleSheet,
     ActivityIndicator,
     Alert,
-    SafeAreaView,
     StatusBar,
     Modal,
     KeyboardAvoidingView,
     Platform,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { getReferralTypes, addReferralType, updateReferralType, deleteReferralType } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
 import { useNavigation } from "@react-navigation/native";

@@ -5,6 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SplashScreen from "expo-splash-screen";
 import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ThemeProvider } from "./src/theme/ThemeContext";
 import { AuthContext } from "./src/context/AuthContext";
 import { getMyPermissions } from "./src/services/api";
@@ -109,29 +110,31 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ErrorBoundary>
-        <AuthContext.Provider
-          value={{
-            userToken,
-            setUserToken,
-            userName,
-            setUserName,
-            userRole,
-            setUserRole,
-            permissions,
-            setPermissions,
-          }}
-        >
-          <ThemeProvider>
-            <NavigationContainer
-              onReady={() => console.log("[App] Navigation Container Ready")}
-              onStateChange={(state) => console.log("[App] Navigation State Changed")}
-            >
-              {userToken ? <AppNavigator /> : <AuthNavigator />}
-            </NavigationContainer>
-          </ThemeProvider>
-        </AuthContext.Provider>
-      </ErrorBoundary>
+      <SafeAreaProvider>
+        <ErrorBoundary>
+          <AuthContext.Provider
+            value={{
+              userToken,
+              setUserToken,
+              userName,
+              setUserName,
+              userRole,
+              setUserRole,
+              permissions,
+              setPermissions,
+            }}
+          >
+            <ThemeProvider>
+              <NavigationContainer
+                onReady={() => console.log("[App] Navigation Container Ready")}
+                onStateChange={(state) => console.log("[App] Navigation State Changed")}
+              >
+                {userToken ? <AppNavigator /> : <AuthNavigator />}
+              </NavigationContainer>
+            </ThemeProvider>
+          </AuthContext.Provider>
+        </ErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

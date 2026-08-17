@@ -2,7 +2,6 @@ import React, { useState, useContext } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Text,
-  SafeAreaView,
   TextInput,
   StyleSheet,
   StatusBar,
@@ -17,6 +16,7 @@ import {
   KeyboardAvoidingView,
   ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons as Icon } from "@expo/vector-icons";

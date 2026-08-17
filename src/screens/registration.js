@@ -9,13 +9,13 @@ import {
   ScrollView,
   Platform,
   StatusBar,
-  SafeAreaView,
   Dimensions,
   ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
   Pressable,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { createPatient, updatePatient, getReferralTypes } from "../services/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRoute, useNavigation } from "@react-navigation/native";

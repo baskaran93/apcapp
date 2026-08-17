@@ -37,7 +37,8 @@
         {
           "cameraPermission": "Allow APC Clinic to use your camera to scan patient intake forms."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ]
   }
 }

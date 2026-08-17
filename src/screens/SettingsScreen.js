@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   Modal,
   Pressable,
@@ -15,6 +14,7 @@ import {
   KeyboardAvoidingView,
   ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons as Icon } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
@@ -279,7 +279,11 @@ const SettingsScreen = () => {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-      <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={[styles.sectionLabel, { color: theme.subText }]}>ACCOUNT</Text>
 
         <SettingRow
@@ -339,16 +343,9 @@ const SettingsScreen = () => {
               isDark={isDark}
               theme={theme}
             />
-            <SettingRow
-              icon="wallet-outline"
-              label="Office Expenses"
-              onPress={() => navigation.navigate("Office Expenses")}
-              isDark={isDark}
-              theme={theme}
-            />
           </>
         )}
-      </View>
+      </ScrollView>
 
       <LogoutModal
         visible={logoutVisible}

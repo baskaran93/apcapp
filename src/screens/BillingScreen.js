@@ -7,12 +7,12 @@ import {
     StyleSheet,
     ActivityIndicator,
     Alert,
-    SafeAreaView,
     StatusBar,
     Platform,
     ScrollView,
     KeyboardAvoidingView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { getPatients, getTreatmentHistory } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
 import { useNavigation } from "@react-navigation/native";

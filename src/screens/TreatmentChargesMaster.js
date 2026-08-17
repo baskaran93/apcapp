@@ -8,12 +8,12 @@ import {
     StyleSheet,
     ActivityIndicator,
     Alert,
-    SafeAreaView,
     StatusBar,
     Modal,
     KeyboardAvoidingView,
     Platform,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { getTreatmentCharges, addTreatmentCharge, updateTreatmentCharge, deleteTreatmentCharge } from "../services/api";
 import { ThemeContext } from "../theme/ThemeContext";
 import { AuthContext } from "../context/AuthContext";
