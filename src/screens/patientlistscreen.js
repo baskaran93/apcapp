@@ -325,7 +325,13 @@ const PatientListScreen = () => {
   };
 
   const goToTreatment = (item) => {
-    navigation.navigate("Home", { screen: "Patient Treatment", params: { patient: item } });
+    navigation.navigate("Patient Treatment", {
+      patient: {
+        id: item?.id || item?.patient_id,
+        name: item?.name || item?.patient_name,
+        phone_number: item?.phone_number || item?.mobile,
+      },
+    });
   };
 
   const handleDeletePatient = (item) => {
