@@ -74,6 +74,12 @@ const toTimeStr12 = (d) => {
   return `${pad(h)}:${pad(m)} ${ap}`;
 };
 
+// "17 Aug · 05:30 PM" — used in the History list, which spans multiple days
+const toDateTimeStr12 = (d) => {
+  const datePart = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  return `${datePart} · ${toTimeStr12(d)}`;
+};
+
 // Parse "hh:mm AM/PM" -> "HH:MM" (24-hr) for building the appointment_date, or null if invalid
 const to24Hour = (timeStr) => {
   const m = (timeStr || "").trim().match(/^(\d{1,2}):([0-5]\d)\s?(AM|PM)$/i);
@@ -127,10 +133,16 @@ export default function AppointmentScreen() {
     ? Math.max(180, SCREEN_HEIGHT - keyboardHeight - 160)
     : MODAL_MAX_HEIGHT - 90;
 
+  const [viewMode, setViewMode] = useState("day"); // "day" | "history"
+  const [showJumpDatePicker, setShowJumpDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(toDateStr(new Date()));
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const [historyAppointments, setHistoryAppointments] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
 
   const [showBookModal, setShowBookModal] = useState(false);
   const [showFixModal, setShowFixModal] = useState(false);
@@ -168,6 +180,23 @@ export default function AppointmentScreen() {
     } catch (e) {
       console.error("LOAD APPOINTMENTS ERROR", e);
       setAppointments([]);
+    }
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+      const res = await getAppointments({ before_date: toDateStr(new Date()) });
+      if (res.ok) {
+        setHistoryAppointments(res.data?.data || []);
+      } else {
+        setHistoryAppointments([]);
+      }
+    } catch (e) {
+      console.error("LOAD APPOINTMENT HISTORY ERROR", e);
+      setHistoryAppointments([]);
+    } finally {
+      setHistoryLoading(false);
     }
   }, []);
 
@@ -223,18 +252,37 @@ export default function AppointmentScreen() {
     loadAppointments(selectedDate);
   }, [selectedDate]);
 
+  useEffect(() => {
+    if (viewMode === "history") loadHistory();
+  }, [viewMode, loadHistory]);
+
   useFocusEffect(
     useCallback(() => {
       loadAppointments(selectedDate);
       loadEnquiries();
-    }, [selectedDate, loadAppointments, loadEnquiries])
+      if (viewMode === "history") loadHistory();
+    }, [selectedDate, loadAppointments, loadEnquiries, viewMode, loadHistory])
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadAppointments(selectedDate);
+    if (viewMode === "history") {
+      await loadHistory();
+    } else {
+      await loadAppointments(selectedDate);
+    }
     setRefreshing(false);
   };
+
+  // Refreshes whichever list is currently on screen (Day view or History)
+  // after a booking/edit/status/convert action.
+  const refreshCurrentView = useCallback(() => {
+    if (viewMode === "history") {
+      loadHistory();
+    } else {
+      loadAppointments(selectedDate);
+    }
+  }, [viewMode, loadHistory, loadAppointments, selectedDate]);
 
   const filteredPatients = useMemo(() => {
     if (!patientSearch.trim()) return [];
@@ -261,6 +309,19 @@ export default function AppointmentScreen() {
       )
       .slice(0, 6);
   }, [enquirySearch, enquiries]);
+
+  const filteredHistory = useMemo(() => {
+    const sorted = [...historyAppointments].sort(
+      (a, b) => new Date(b.appointment_date) - new Date(a.appointment_date)
+    );
+    if (!historySearch.trim()) return sorted;
+    const q = historySearch.toLowerCase();
+    return sorted.filter(
+      (a) =>
+        (a.patient_name || "").toLowerCase().includes(q) ||
+        (a.patient_phone || "").includes(q)
+    );
+  }, [historyAppointments, historySearch]);
 
   const resetBookForm = () => {
     setBookMode("patient");
@@ -351,7 +412,7 @@ export default function AppointmentScreen() {
         setShowBookModal(false);
         resetBookForm();
         Alert.alert("Success", "Appointment booked successfully.");
-        loadAppointments(selectedDate);
+        refreshCurrentView();
       } else {
         const msg = res.data?.detail || res.data?.message || "Failed to book appointment.";
         Alert.alert("Error", typeof msg === "string" ? msg : JSON.stringify(msg));
@@ -377,7 +438,7 @@ export default function AppointmentScreen() {
               const res = await convertEnquiryToPatient(appt.enquiry_id);
               if (res.ok) {
                 Alert.alert("Success", `Converted to patient ${res.data?.data?.patient_id || ""}.`);
-                loadAppointments(selectedDate);
+                refreshCurrentView();
                 loadPatients();
                 loadEnquiries();
               } else {
@@ -422,7 +483,7 @@ export default function AppointmentScreen() {
       if (res.ok) {
         setShowFixModal(false);
         setActiveAppt(null);
-        loadAppointments(selectedDate);
+        refreshCurrentView();
       } else {
         Alert.alert("Error", "Failed to update appointment.");
       }
@@ -438,7 +499,7 @@ export default function AppointmentScreen() {
     try {
       const res = await updateAppointment(appt.id, { status });
       if (res.ok) {
-        loadAppointments(selectedDate);
+        refreshCurrentView();
       } else {
         Alert.alert("Error", "Failed to update status.");
       }
@@ -458,7 +519,7 @@ export default function AppointmentScreen() {
           try {
             const res = await cancelAppointment(appt.id);
             if (res.ok) {
-              loadAppointments(selectedDate);
+              refreshCurrentView();
             } else {
               Alert.alert("Error", "Failed to cancel appointment.");
             }
@@ -487,7 +548,9 @@ export default function AppointmentScreen() {
         <View style={styles.apptTopRow}>
           <View style={styles.apptTimeWrap}>
             <Icon name="time-outline" size={16} color={theme.primary} />
-            <Text style={[styles.apptTime, { color: theme.text }]}>{toTimeStr12(d)}</Text>
+            <Text style={[styles.apptTime, { color: theme.text }]}>
+              {viewMode === "history" ? toDateTimeStr12(d) : toTimeStr12(d)}
+            </Text>
           </View>
           <View style={{ flexDirection: "row", gap: 6 }}>
             {item.is_enquiry && (
@@ -573,7 +636,7 @@ export default function AppointmentScreen() {
           <View>
             <Text style={[styles.title, { color: theme.text }]}>Appointments</Text>
             <Text style={[styles.subtitle, { color: theme.subText }]}>
-              Daily appointment booking & fixing
+              {viewMode === "history" ? "Previous appointment history" : "Daily appointment booking & fixing"}
             </Text>
           </View>
           {canAdd && (
@@ -587,53 +650,160 @@ export default function AppointmentScreen() {
           )}
         </View>
 
-        {/* Date chips */}
-        <View style={styles.chipRow}>
-          {DATE_CHIPS.map((c) => {
-            const d = new Date();
-            d.setDate(d.getDate() + c.offset);
-            const dateStr = toDateStr(d);
-            const active = selectedDate === dateStr;
-            return (
-              <TouchableOpacity
-                key={c.label}
-                onPress={() => setSelectedDate(dateStr)}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: active ? theme.primary : theme.card,
-                    borderColor: active ? theme.primary : isDark ? "rgba(255,255,255,0.1)" : "#e5e7eb",
-                  },
-                ]}
-              >
-                <Text style={{ color: active ? "#fff" : theme.text, fontWeight: "700", fontSize: 13 }}>
-                  {c.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+        {/* Upcoming / History toggle */}
+        <View style={styles.viewToggleRow}>
+          <TouchableOpacity
+            onPress={() => setViewMode("day")}
+            style={[
+              styles.viewToggleBtn,
+              {
+                backgroundColor: viewMode === "day" ? theme.primary : theme.card,
+                borderColor: viewMode === "day" ? theme.primary : isDark ? "rgba(255,255,255,0.1)" : "#e5e7eb",
+              },
+            ]}
+          >
+            <Icon name="calendar-outline" size={14} color={viewMode === "day" ? "#fff" : theme.subText} />
+            <Text style={{ color: viewMode === "day" ? "#fff" : theme.text, fontWeight: "700", fontSize: 13 }}>
+              Upcoming
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setViewMode("history")}
+            style={[
+              styles.viewToggleBtn,
+              {
+                backgroundColor: viewMode === "history" ? theme.primary : theme.card,
+                borderColor: viewMode === "history" ? theme.primary : isDark ? "rgba(255,255,255,0.1)" : "#e5e7eb",
+              },
+            ]}
+          >
+            <Icon name="time-outline" size={14} color={viewMode === "history" ? "#fff" : theme.subText} />
+            <Text style={{ color: viewMode === "history" ? "#fff" : theme.text, fontWeight: "700", fontSize: 13 }}>
+              History
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color={theme.primary} />
-          </View>
-        ) : appointments.length === 0 ? (
-          <View style={styles.center}>
-            <Icon name="calendar-outline" size={48} color={theme.subText} />
-            <Text style={{ color: theme.subText, marginTop: 12 }}>
-              No appointments for {selectedDate}
-            </Text>
-          </View>
+        {viewMode === "day" ? (
+          <>
+            {/* Date chips + jump-to-date */}
+            <View style={styles.chipRow}>
+              {DATE_CHIPS.map((c) => {
+                const d = new Date();
+                d.setDate(d.getDate() + c.offset);
+                const dateStr = toDateStr(d);
+                const active = selectedDate === dateStr;
+                return (
+                  <TouchableOpacity
+                    key={c.label}
+                    onPress={() => setSelectedDate(dateStr)}
+                    style={[
+                      styles.chip,
+                      {
+                        backgroundColor: active ? theme.primary : theme.card,
+                        borderColor: active ? theme.primary : isDark ? "rgba(255,255,255,0.1)" : "#e5e7eb",
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: active ? "#fff" : theme.text, fontWeight: "700", fontSize: 13 }}>
+                      {c.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+
+              <TouchableOpacity
+                onPress={() => setShowJumpDatePicker(true)}
+                style={[
+                  styles.chip,
+                  styles.jumpDateChip,
+                  { backgroundColor: theme.card, borderColor: isDark ? "rgba(255,255,255,0.1)" : "#e5e7eb" },
+                ]}
+              >
+                <Icon name="calendar-number-outline" size={16} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+            {showJumpDatePicker && (
+              <DateTimePicker
+                value={/^\d{4}-\d{2}-\d{2}$/.test(selectedDate) ? new Date(`${selectedDate}T00:00:00`) : new Date()}
+                mode="date"
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                onChange={(event, date) => {
+                  setShowJumpDatePicker(Platform.OS === "ios");
+                  if (event.type !== "dismissed" && date) {
+                    setSelectedDate(toDateStr(date));
+                  }
+                  if (Platform.OS !== "ios") setShowJumpDatePicker(false);
+                }}
+              />
+            )}
+
+            {loading ? (
+              <View style={styles.center}>
+                <ActivityIndicator size="large" color={theme.primary} />
+              </View>
+            ) : appointments.length === 0 ? (
+              <View style={styles.center}>
+                <Icon name="calendar-outline" size={48} color={theme.subText} />
+                <Text style={{ color: theme.subText, marginTop: 12 }}>
+                  No appointments for {selectedDate}
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={appointments}
+                keyExtractor={(item) => String(item.id)}
+                renderItem={renderAppointment}
+                contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+              />
+            )}
+          </>
         ) : (
-          <FlatList
-            data={appointments}
-            keyExtractor={(item) => String(item.id)}
-            renderItem={renderAppointment}
-            contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-          />
+          <>
+            {/* History search */}
+            <View style={styles.historySearchWrap}>
+              <View
+                style={[
+                  styles.historySearchInput,
+                  { backgroundColor: theme.card, borderColor: isDark ? "rgba(255,255,255,0.1)" : "#e5e7eb" },
+                ]}
+              >
+                <Icon name="search-outline" size={16} color="#94a3b8" />
+                <TextInput
+                  value={historySearch}
+                  onChangeText={setHistorySearch}
+                  placeholder="Search history by patient name / phone"
+                  placeholderTextColor="#94a3b8"
+                  style={[styles.historySearchText, { color: theme.text }]}
+                />
+              </View>
+            </View>
+
+            {historyLoading ? (
+              <View style={styles.center}>
+                <ActivityIndicator size="large" color={theme.primary} />
+              </View>
+            ) : filteredHistory.length === 0 ? (
+              <View style={styles.center}>
+                <Icon name="time-outline" size={48} color={theme.subText} />
+                <Text style={{ color: theme.subText, marginTop: 12 }}>
+                  {historySearch.trim() ? "No matching appointments found" : "No previous appointments yet"}
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={filteredHistory}
+                keyExtractor={(item) => String(item.id)}
+                renderItem={renderAppointment}
+                contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+              />
+            )}
+          </>
         )}
       </SafeAreaView>
 
@@ -1219,17 +1389,54 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "800",
   },
-  chipRow: {
+  viewToggleRow: {
     flexDirection: "row",
     gap: 10,
     paddingHorizontal: 20,
     marginTop: 16,
+  },
+  viewToggleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  chipRow: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 20,
+    marginTop: 12,
   },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
+  },
+  jumpDateChip: {
+    paddingHorizontal: 12,
+  },
+  historySearchWrap: {
+    paddingHorizontal: 20,
+    marginTop: 14,
+  },
+  historySearchInput: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+  },
+  historySearchText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    ...Platform.select({ web: { outlineStyle: "none" } }),
   },
   center: {
     flex: 1,
